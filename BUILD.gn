@@ -1864,17 +1864,11 @@ if (is_wasm) {
 }
 
 group("modules") {
-  deps = [
-    "modules/bentleyottmann",
-    "modules/pathops",
-    "modules/skottie",
-    "modules/skparagraph",
-    "modules/skshaper",
-    "modules/svg",
-  ]
-
-  if (is_wasm) {
-    deps += [ "modules/canvaskit" ]
+  # rust-skia: Only add modules/skparagraph if we do use icu for now, which prevents a linker error on macOS.
+  if (skia_use_icu) {
+    deps = [ "modules/skparagraph" ]
+  } else {
+    deps = []
   }
 }
 
