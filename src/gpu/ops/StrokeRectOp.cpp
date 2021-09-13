@@ -284,7 +284,7 @@ bool stroke_dev_half_size_supported(SkVector devHalfStrokeSize) {
     // The inner coverage values will be equal if the horizontal and vertical stroke widths are
     // equal (in which case innerCoverage is same for all sides of the rects) or if the horizontal
     // and vertical stroke widths are both greater than 1 (in which case innerCoverage will always
-    // be 1). In actuality we allow them to be nearly-equal since differing by < 1/1000 will not be
+    // be 1). In actuality we allow them to be nearly-equal since differing by < 1/10000 will not be
     // visually detectable when the shape is already less than 1px in thickness.
     return SkScalarNearlyEqual(devHalfStrokeSize.fX, devHalfStrokeSize.fY) ||
            std::min(devHalfStrokeSize.fX, devHalfStrokeSize.fY) >= .5f;
@@ -823,7 +823,7 @@ void AAStrokeRectOp::generateAAStrokeRectGeometry(GrVertexWriter& vertices,
     float inset = std::min(0.5f, std::min(devHalfStrokeSize.fX, devHalfStrokeSize.fY));
     float innerCoverage = 1;
     if (inset < 0.5f) {
-        // Stroke is subpixel, so reduce the coverage to simulate the narrower strokes.
+        // Stroke is subpixel, so reduce the coverage to simulate the narrower strokes
         innerCoverage = 2 * inset / (inset + .5f);
     }
 
