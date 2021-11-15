@@ -65,6 +65,7 @@ GrBackendFormat GetBackendFormat(GrDirectContext* dContext, AHardwareBuffer* har
     GrBackendApi backend = dContext->backend();
 
     if (backend == GrBackendApi::kOpenGL) {
+#ifdef SK_GL
         switch (bufferFormat) {
             //TODO: find out if we can detect, which graphic buffers support GR_GL_TEXTURE_2D
             case AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM:
@@ -85,6 +86,9 @@ GrBackendFormat GetBackendFormat(GrDirectContext* dContext, AHardwareBuffer* har
                     return GrBackendFormat::MakeGL(GR_GL_RGBA8, GR_GL_TEXTURE_EXTERNAL);
                 }
         }
+#else
+        return GrBackendFormat();
+#endif
     } else if (backend == GrBackendApi::kVulkan) {
 #ifdef SK_VULKAN
         switch (bufferFormat) {
