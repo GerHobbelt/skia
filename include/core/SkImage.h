@@ -523,8 +523,6 @@ public:
                                                  PromiseImageTextureReleaseProc textureReleaseProc,
                                                  PromiseImageTextureContext textureContexts[]);
 
-#endif // SK_SUPPORT_GPU
-
 #if defined(SK_BUILD_FOR_ANDROID) && __ANDROID_API__ >= 26
     /** (See Skia bug 7447)
         Creates SkImage from Android hardware buffer.
@@ -559,6 +557,8 @@ public:
             AHardwareBuffer* hardwareBuffer,
             GrSurfaceOrigin surfaceOrigin = kTopLeft_GrSurfaceOrigin);
 #endif
+
+#endif // SK_SUPPORT_GPU
 
     /** Returns a SkImageInfo describing the width, height, color type, alpha type, and color space
         of the SkImage.
