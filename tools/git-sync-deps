@@ -262,9 +262,10 @@ def main(argv):
   subprocess.check_call(
       [sys.executable,
        os.path.join(os.path.dirname(deps_file_path), 'bin', 'fetch-gn')])
-  subprocess.check_call(
-      [sys.executable,
-       os.path.join(os.path.dirname(deps_file_path), 'bin', 'activate-emsdk')])
+# rust-skia: m100: don't activate emsdk for every build 
+#  subprocess.check_call(
+#      [sys.executable,
+#       os.path.join(os.path.dirname(deps_file_path), 'bin', 'activate-emsdk')])
   return 0
 
 
