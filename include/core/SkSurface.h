@@ -191,6 +191,8 @@ public:
     /** User function called when supplied texture may be deleted. */
     typedef void (*TextureReleaseProc)(ReleaseContext releaseContext);
 
+#if SK_SUPPORT_GPU
+
     /** Wraps a GPU-backed texture into SkSurface. Caller must ensure the texture is
         valid for the lifetime of returned SkSurface. If sampleCnt greater than zero,
         creates an intermediate MSAA SkSurface which is used for drawing backendTexture.
@@ -260,6 +262,8 @@ public:
                                                 const SkSurfaceProps* surfaceProps,
                                                 RenderTargetReleaseProc releaseProc = nullptr,
                                                 ReleaseContext releaseContext = nullptr);
+
+#endif
 
     /** Returns SkSurface on GPU indicated by context. Allocates memory for
         pixels, based on the width, height, and SkColorType in SkImageInfo.  budgeted
@@ -353,6 +357,8 @@ public:
 #endif
     }
 
+#if SK_SUPPORT_GPU
+
     /** Returns SkSurface on GPU indicated by context that is compatible with the provided
         characterization. budgeted selects whether allocation for pixels is tracked by context.
 
@@ -364,6 +370,7 @@ public:
                                              const SkSurfaceCharacterization& characterization,
                                              SkBudgeted budgeted);
 
+#endif
 
 #if defined(SK_BUILD_FOR_ANDROID) && __ANDROID_API__ >= 26
     /** Private.
