@@ -815,7 +815,11 @@ public:
         example: https://fiddle.skia.org/c/@Bitmap_erase
     */
     void erase(SkColor4f c, SkColorSpace* colorSpace, const SkIRect& area) const;
+
+#if false
+    // rust-skia: This function is not implemented (-Clink-dead-code).
     void erase(SkColor4f c, const SkIRect& area) const;
+#endif
 
     /** Replaces pixel values inside area with c. interpreted as being in the sRGB
         SkColorSpace. If area does not intersect bounds(), call has no effect.
