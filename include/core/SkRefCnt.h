@@ -222,7 +222,10 @@ private:
 #else
 #define SK_SP_TRIVIAL_ABI
 #endif
-template <typename T> class SK_SP_TRIVIAL_ABI sk_sp {
+template <typename T> class 
+/* rust-skia: clang::trivial_abi leads to heap corruption and segmentation faults in Rust
+    SK_SP_TRIVIAL_ABI 
+*/ sk_sp {
 public:
     using element_type = T;
 
