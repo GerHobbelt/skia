@@ -866,10 +866,11 @@ public:
         @param callback        function to call with result of the read
         @param context         passed to callback
      */
-    void asyncReadPixels(const SkImageInfo& info,
-                         const SkIRect& srcRect,
-                         ReadPixelsCallback callback,
-                         ReadPixelsContext context);
+    // rust-skia: m108: Not implemented (yet?)
+    // void asyncReadPixels(const SkImageInfo& info,
+    //                      const SkIRect& srcRect,
+    //                      ReadPixelsCallback callback,
+    //                      ReadPixelsContext context);
 
     /** Makes surface pixel data available to caller, possibly asynchronously. It can also rescale
         the surface pixels.
