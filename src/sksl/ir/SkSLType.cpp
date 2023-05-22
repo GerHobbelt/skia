@@ -1039,7 +1039,7 @@ const Type* Type::clone(SymbolTable* symbolTable) const {
             return symbolTable->add(
                     std::make_unique<StructType>(this->fPosition,
                                                  *name,
-                                                 std::vector(fieldSpan.begin(), fieldSpan.end()),
+                                                 std::vector<Field>(fieldSpan.begin(), fieldSpan.end()),
                                                  this->isInterfaceBlock()));
         }
         default:

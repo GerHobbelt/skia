@@ -3538,7 +3538,7 @@ SpvId SPIRVCodeGenerator::writeInterfaceBlock(const InterfaceBlock& intf, bool a
         // entirely new block when the variable is referenced. And we can't modify the existing
         // block, so we instead create a modified copy of it and write that.
         SkSpan<const Type::Field> fieldSpan = type.fields();
-        std::vector fields(fieldSpan.begin(), fieldSpan.end());
+        std::vector<Type::Field> fields(fieldSpan.begin(), fieldSpan.end());
         fields.emplace_back(Position(),
                             Modifiers(Layout(/*flags=*/0,
                                              /*location=*/-1,
