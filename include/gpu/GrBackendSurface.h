@@ -181,9 +181,10 @@ private:
 
 #if !defined(SK_DISABLE_LEGACY_VK_BACKEND_SURFACE) && defined(SK_VULKAN)
 public:
-    GrBackendFormat(VkFormat vkFormat,
-                    const GrVkYcbcrConversionInfo& ycbcrInfo,
-                    bool willUseDRMFormatModifiers = false);
+    // rust-skia: Implementation missing.
+    // GrBackendFormat(VkFormat vkFormat,
+    //                 const GrVkYcbcrConversionInfo& ycbcrInfo,
+    //                 bool willUseDRMFormatModifiers = false);
     static GrBackendFormat MakeVk(VkFormat format, bool willUseDRMFormatModifiers = false);
     static GrBackendFormat MakeVk(const GrVkYcbcrConversionInfo& ycbcrInfo,
                                   bool willUseDRMFormatModifiers = false);
