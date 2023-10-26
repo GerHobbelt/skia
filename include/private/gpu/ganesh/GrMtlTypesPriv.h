@@ -18,19 +18,21 @@
 #include <TargetConditionals.h>
 
 #if defined(SK_BUILD_FOR_MAC)
-#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 130000
-#define GR_METAL_SDK_VERSION 300
-#elif __MAC_OS_X_VERSION_MAX_ALLOWED >= 120000
-#define GR_METAL_SDK_VERSION 240
-#elif __MAC_OS_X_VERSION_MAX_ALLOWED >= 110000
-#define GR_METAL_SDK_VERSION 230
-#elif __MAC_OS_X_VERSION_MAX_ALLOWED >= 101500
-#define GR_METAL_SDK_VERSION 220
-#elif __MAC_OS_X_VERSION_MAX_ALLOWED >= 101400
+// rust-skia: As long MACOSX_DEPLOYMENT_TARGET is not considered, we pin to the lowest version for now (10.14).
 #define GR_METAL_SDK_VERSION 210
-#else
-#error Must use at least 10.14 SDK to build Metal backend for MacOS
-#endif
+// #if __MAC_OS_X_VERSION_MAX_ALLOWED >= 130000
+// #define GR_METAL_SDK_VERSION 300
+// #elif __MAC_OS_X_VERSION_MAX_ALLOWED >= 120000
+// #define GR_METAL_SDK_VERSION 240
+// #elif __MAC_OS_X_VERSION_MAX_ALLOWED >= 110000
+// #define GR_METAL_SDK_VERSION 230
+// #elif __MAC_OS_X_VERSION_MAX_ALLOWED >= 101500
+// #define GR_METAL_SDK_VERSION 220
+// #elif __MAC_OS_X_VERSION_MAX_ALLOWED >= 101400
+// #define GR_METAL_SDK_VERSION 210
+// #else
+// #error Must use at least 10.14 SDK to build Metal backend for MacOS
+// #endif
 #else
 #if __IPHONE_OS_VERSION_MAX_ALLOWED >= 160000 || __TV_OS_VERSION_MAX_ALLOWED >= 160000
 #define GR_METAL_SDK_VERSION 300
