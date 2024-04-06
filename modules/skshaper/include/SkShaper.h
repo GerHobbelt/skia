@@ -142,7 +142,8 @@ public:
     MakeBiDiRunIterator(const char* utf8, size_t utf8Bytes, uint8_t bidiLevel);
 #if defined(SK_SHAPER_UNICODE_AVAILABLE)
     static std::unique_ptr<BiDiRunIterator>
-    MakeSkUnicodeBidiRunIterator(SkUnicode* unicode, const char* utf8, size_t utf8Bytes, uint8_t bidiLevel);
+    // rust-skia: Not implemented
+    // MakeSkUnicodeBidiRunIterator(SkUnicode* unicode, const char* utf8, size_t utf8Bytes, uint8_t bidiLevel);
     static std::unique_ptr<BiDiRunIterator>
     MakeIcuBiDiRunIterator(const char* utf8, size_t utf8Bytes, uint8_t bidiLevel);
 #endif  // defined(SK_SHAPER_UNICODE_AVAILABLE)
