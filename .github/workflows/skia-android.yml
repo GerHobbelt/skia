@@ -1,0 +1,4 @@
+name: 安卓libskia.so(darkblade)
+
+on:
+  workflow_dispatch:
