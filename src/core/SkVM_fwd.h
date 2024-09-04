@@ -11,7 +11,7 @@
 namespace skvm {
     class Assembler;
     class Builder;
-    class Program;
+    class Program; // NOLINT(bugprone-forward-declaration-namespace)
     struct Ptr;
     struct I32;
     struct F32;
