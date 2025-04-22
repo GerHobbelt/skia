@@ -20,6 +20,7 @@ class SkiaConan(ConanFile):
         self.copy("*.h*", src=base + "include/config", dst=relative + "include/config")
         self.copy("*.h*", src=base + "include/core", dst=relative + "include/core")
         self.copy("*.h*", src=base + "include/effects", dst=relative + "include/effects")
+        self.copy("*.h*", src=base + "include/encode", dst=relative + "include/encode")
         self.copy("*.h*", src=base + "include/gpu", dst=relative + "include/gpu")
         self.copy("*.h*", src=base + "include/private", dst=relative + "include/private")
         self.copy("skcms.h", src=base + "include/third_party/skcms", dst=relative + "include/third_party/skcms")
