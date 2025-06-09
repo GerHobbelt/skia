@@ -231,7 +231,8 @@ public:
 
         @return the recorder; should be non-null for drawable surfaces
     */
-    SkRecorder* baseRecorder() const;
+    // rust-skia: Not actually implemented (see windows-link-dead-code job).
+    // SkRecorder* baseRecorder() const;
 
     enum class BackendHandleAccess {
         kFlushRead,     //!< back-end object is readable
