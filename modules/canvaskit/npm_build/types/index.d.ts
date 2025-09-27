@@ -81,7 +81,7 @@ export interface CanvasKit {
     computeTonalColors(colors: TonalColorsInput): TonalColorsOutput;
 
     /**
-     * Returns a rectangle with the given paramaters. See Rect.h for more.
+     * Returns a rectangle with the given parameters. See Rect.h for more.
      * @param left - The x coordinate of the upper-left corner.
      * @param top  - The y coordinate of the upper-left corner.
      * @param right - The x coordinate of the lower-right corner.
@@ -90,7 +90,7 @@ export interface CanvasKit {
     LTRBRect(left: number, top: number, right: number, bottom: number): Rect;
 
     /**
-     * Returns a rectangle with the given paramaters. See Rect.h for more.
+     * Returns a rectangle with the given parameters. See Rect.h for more.
      * @param x - The x coordinate of the upper-left corner.
      * @param y  - The y coordinate of the upper-left corner.
      * @param width - The width of the rectangle.
@@ -99,7 +99,7 @@ export interface CanvasKit {
     XYWHRect(x: number, y: number, width: number, height: number): Rect;
 
     /**
-     * Returns a rectangle with the given integer paramaters. See Rect.h for more.
+     * Returns a rectangle with the given integer parameters. See Rect.h for more.
      * @param left - The x coordinate of the upper-left corner.
      * @param top  - The y coordinate of the upper-left corner.
      * @param right - The x coordinate of the lower-right corner.
@@ -108,7 +108,7 @@ export interface CanvasKit {
     LTRBiRect(left: number, top: number, right: number, bottom: number): IRect;
 
     /**
-     * Returns a rectangle with the given paramaters. See Rect.h for more.
+     * Returns a rectangle with the given parameters. See Rect.h for more.
      * @param x - The x coordinate of the upper-left corner.
      * @param y  - The y coordinate of the upper-left corner.
      * @param width - The width of the rectangle.
