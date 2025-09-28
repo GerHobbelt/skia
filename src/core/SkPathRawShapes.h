@@ -12,6 +12,7 @@
 #include "include/core/SkPoint.h"
 #include "src/core/SkPathRaw.h"
 
+class SkRRect;
 struct SkRect;
 
 namespace SkPathRawShapes {
@@ -21,7 +22,7 @@ namespace SkPathRawShapes {
  */
 
 struct Rect : public SkPathRaw {
-    SkPoint fStorage[5];   // move + 4 lines (+ close)
+    SkPoint fStorage[4];   // move + 3 lines (+ close)
 
     Rect(const SkRect&,
          SkPathDirection = SkPathDirection::kCW,
@@ -29,11 +30,21 @@ struct Rect : public SkPathRaw {
 };
 
 struct Oval : public SkPathRaw {
-    SkPoint fStorage[9];   // move + 4 conics
+    SkPoint fStorage[9];   // move + 4 conics (+ close)
 
     Oval(const SkRect&,
          SkPathDirection = SkPathDirection::kCW,
          unsigned index = 1);
+};
+
+struct RRect : public SkPathRaw {
+    SkPoint fStorage[13];   // worse case: move + 4 conics + 4 lines (+ close)
+
+    RRect(const SkRRect&, SkPathDirection dir, unsigned index);
+    RRect(const SkRRect& rr, SkPathDirection dir)
+        : RRect(rr, dir, (dir == SkPathDirection::kCW ? 6 : 7)) {}
+    RRect(const SkRRect& rr)
+        : RRect(rr, SkPathDirection::kCW, 6) {}
 };
 
 } // namespace

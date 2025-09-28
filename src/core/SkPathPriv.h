@@ -49,7 +49,7 @@ class SkPathPriv {
 public:
     static uint8_t ComputeSegmentMask(SkSpan<const SkPathVerb>);
 
-    static SkPathVerbAnalysis AnalyzeVerbs(SkSpan<const uint8_t> verbs);
+    static SkPathVerbAnalysis AnalyzeVerbs(SkSpan<const SkPathVerb> verbs);
 
     // skbug.com/40041027: Not a perfect solution for W plane clipping, but 1/16384 is a
     // reasonable limit (roughly 5e-5)
@@ -79,43 +79,47 @@ public:
      */
     static SkPathFirstDirection ComputeFirstDirection(const SkPath&);
 
-    static bool IsClosedSingleContour(const SkPath& path) {
-        int verbCount = path.countVerbs();
-        if (verbCount == 0)
+    static bool IsClosedSingleContour(SkSpan<const SkPathVerb> verbs) {
+        if (verbs.empty()) {
             return false;
+        }
+
         int moveCount = 0;
-        auto verbs = path.fPathRef->verbsBegin();
-        for (int i = 0; i < verbCount; i++) {
-            switch (verbs[i]) {
-                case SkPath::Verb::kMove_Verb:
-                    moveCount += 1;
-                    if (moveCount > 1) {
+        for (const auto& verb : verbs) {
+            switch (verb) {
+                case SkPathVerb::kMove:
+                    if (++moveCount > 1) {
                         return false;
                     }
                     break;
-                case SkPath::Verb::kClose_Verb:
-                    if (i == verbCount - 1) {
-                        return true;
-                    }
-                    return false;
-                default: break;
+                case SkPathVerb::kClose:
+                    return &verb == &verbs.back();
+                default:
+                    break;
             }
         }
         return false;
     }
 
+    static bool IsClosedSingleContour(const SkPath& path) {
+        return IsClosedSingleContour(path.fPathRef->verbs());
+    }
+
     // In some scenarios (e.g. fill or convexity checking all but the last leading move to are
     // irrelevant to behavior). SkPath::injectMoveToIfNeeded should ensure that this is always at
     // least 1.
-    static int LeadingMoveToCount(const SkPath& path) {
-        int verbCount = path.countVerbs();
-        auto verbs = path.fPathRef->verbsBegin();
-        for (int i = 0; i < verbCount; i++) {
-            if (verbs[i] != SkPath::Verb::kMove_Verb) {
+    static int LeadingMoveToCount(SkSpan<const SkPathVerb> verbs) {
+        const int N = SkToInt(verbs.size());
+        for (int i = 0; i < N; i++) {
+            if (verbs[i] != SkPathVerb::kMove) {
                 return i;
             }
         }
-        return verbCount; // path is all move verbs
+        return N; // path is all move verbs
+    }
+
+    static int LeadingMoveToCount(const SkPath& path) {
+        return LeadingMoveToCount(path.fPathRef->verbs());
     }
 
     static void AddGenIDChangeListener(const SkPath& path, sk_sp<SkIDChangeListener> listener) {
@@ -123,12 +127,19 @@ public:
     }
 
     /**
-     * This returns true for a rect that has a move followed by 3 or 4 lines and a close. If
+     * This returns the info for a rect that has a move followed by 3 or 4 lines and a close. If
      * 'isSimpleFill' is true, an uncloseed rect will also be accepted as long as it starts and
      * ends at the same corner. This does not permit degenerate line or point rectangles.
      */
-    static bool IsSimpleRect(const SkPath& path, bool isSimpleFill, SkRect* rect,
-                             SkPathDirection* direction, unsigned* start);
+    static std::optional<SkPathRectInfo> IsSimpleRect(const SkPath& path, bool isSimpleFill);
+
+    // Asserts the path contour was built from RRect, so it does not return
+    // an optional. This exists so path's can have a flag that they are really
+    // a RRect, without having to actually store the 4 radii... since those can
+    // be deduced from the contour itself.
+    //
+    static SkRRect DeduceRRectFromContour(const SkRect& bounds,
+                                          SkSpan<const SkPoint>, SkSpan<const SkPathVerb>);
 
     /**
      * Creates a path from arc params using the semantics of SkCanvas::drawArc. This function
@@ -145,30 +156,6 @@ public:
     static void ShrinkToFit(SkPath* path) {
         path->shrinkToFit();
     }
-
-    /**
-     * Returns a C++11-iterable object that traverses a path's verbs in order. e.g:
-     *
-     *   for (SkPath::Verb verb : SkPathPriv::Verbs(path)) {
-     *       ...
-     *   }
-     */
-    struct Verbs {
-    public:
-        Verbs(const SkPath& path) : fPathRef(path.fPathRef.get()) {}
-        struct Iter {
-            void operator++() { fVerb++; }
-            bool operator!=(const Iter& b) const { return fVerb != b.fVerb; }
-            SkPath::Verb operator*() { return static_cast<SkPath::Verb>(*fVerb); }
-            const uint8_t* fVerb;
-        };
-        Iter begin() { return Iter{fPathRef->verbsBegin()}; }
-        Iter end() { return Iter{fPathRef->verbsEnd()}; }
-    private:
-        Verbs(const Verbs&) = delete;
-        Verbs& operator=(const Verbs&) = delete;
-        SkPathRef* fPathRef;
-    };
 
     /**
       * Iterates through a raw range of path verbs, points, and conics. All values are returned
@@ -239,59 +226,16 @@ public:
         return path.hasComputedBounds();
     }
 
-    /** Returns true if constructed by addCircle(), addOval(); and in some cases,
-     addRoundRect(), addRRect(). SkPath constructed with conicTo() or rConicTo() will not
-     return true though SkPath draws oval.
-
-     rect receives bounds of oval.
-     dir receives SkPathDirection of oval: kCW_Direction if clockwise, kCCW_Direction if
-     counterclockwise.
-     start receives start of oval: 0 for top, 1 for right, 2 for bottom, 3 for left.
-
-     rect, dir, and start are unmodified if oval is not found.
-
-     Triggers performance optimizations on some GPU surface implementations.
-
-     @param rect   storage for bounding SkRect of oval; may be nullptr
-     @param dir    storage for SkPathDirection; may be nullptr
-     @param start  storage for start of oval; may be nullptr
-     @return       true if SkPath was constructed by method that reduces to oval
+    /** Returns the oval info if this path was created as an oval or circle, else returns {}.
      */
-    static bool IsOval(const SkPath& path, SkRect* rect, SkPathDirection* dir, unsigned* start) {
-        bool isCCW = false;
-        bool result = path.fPathRef->isOval(rect, &isCCW, start);
-        if (dir && result) {
-            *dir = isCCW ? SkPathDirection::kCCW : SkPathDirection::kCW;
-        }
-        return result;
+    static std::optional<SkPathOvalInfo> IsOval(const SkPath& path) {
+        return path.fPathRef->isOval();
     }
 
-    /** Returns true if constructed by addRoundRect(), addRRect(); and if construction
-     is not empty, not SkRect, and not oval. SkPath constructed with other calls
-     will not return true though SkPath draws SkRRect.
-
-     rrect receives bounds of SkRRect.
-     dir receives SkPathDirection of oval: kCW_Direction if clockwise, kCCW_Direction if
-     counterclockwise.
-     start receives start of SkRRect: 0 for top, 1 for right, 2 for bottom, 3 for left.
-
-     rrect, dir, and start are unmodified if SkRRect is not found.
-
-     Triggers performance optimizations on some GPU surface implementations.
-
-     @param rrect  storage for bounding SkRect of SkRRect; may be nullptr
-     @param dir    storage for SkPathDirection; may be nullptr
-     @param start  storage for start of SkRRect; may be nullptr
-     @return       true if SkPath contains only SkRRect
+    /** Returns the rrect info if this path was created as one, else returns {}.
      */
-    static bool IsRRect(const SkPath& path, SkRRect* rrect, SkPathDirection* dir,
-                        unsigned* start) {
-        bool isCCW = false;
-        bool result = path.fPathRef->isRRect(rrect, &isCCW, start);
-        if (dir && result) {
-            *dir = isCCW ? SkPathDirection::kCCW : SkPathDirection::kCW;
-        }
-        return result;
+    static std::optional<SkPathRRectInfo> IsRRect(const SkPath& path) {
+        return path.fPathRef->isRRect();
     }
 
     /**
@@ -366,6 +310,17 @@ public:
     }
 
     static int LastMoveToIndex(const SkPath& path) { return path.fLastMoveToIndex; }
+
+    struct RectContour {
+        SkRect          fRect;
+        bool            fIsClosed;
+        SkPathDirection fDirection;
+        size_t          fPointsConsumed,
+                        fVerbsConsumed;
+    };
+    static std::optional<RectContour> IsRectContour(SkSpan<const SkPoint> ptSpan,
+                                                    SkSpan<const SkPathVerb> vbSpan,
+                                                    bool allowPartial);
 
     static bool IsRectContour(const SkPath&, bool allowPartial, int* currVerb,
                               const SkPoint** ptsPtr, bool* isClosed, SkPathDirection* direction,
@@ -449,7 +404,7 @@ public:
         return std::nullopt;
     }
 
-    static SkSpan<const uint8_t> GetVerbs(const SkPathBuilder& builder) {
+    static SkSpan<const SkPathVerb> GetVerbs(const SkPathBuilder& builder) {
         return builder.fVerbs;
     }
 
@@ -459,12 +414,11 @@ public:
 
     static SkPath MakePath(const SkPathVerbAnalysis& analysis,
                            const SkPoint points[],
-                           const uint8_t verbs[],
-                           int verbCount,
+                           SkSpan<const SkPathVerb> verbs,
                            const SkScalar conics[],
                            SkPathFillType fillType,
                            bool isVolatile) {
-        return SkPath::MakeInternal(analysis, points, verbs, verbCount, conics, fillType, isVolatile);
+        return SkPath::MakeInternal(analysis, points, verbs, conics, fillType, isVolatile);
     }
 
     static SkPathRaw Raw(const SkPath& path) {

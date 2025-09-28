@@ -8,6 +8,7 @@
 #include "include/core/SkPath.h"
 #include "include/core/SkPathTypes.h"
 #include "include/core/SkPoint.h"
+#include "include/core/SkRRect.h"
 #include "include/core/SkRect.h"
 
 #include "src/core/SkPathRaw.h"
@@ -21,13 +22,7 @@ const SkPathDirection gDirections[] = {
 };
 
 static SkPath path_from_raw(const SkPathRaw& raw) {
-    // Need to update SkPath::Make() to take <SkPathVerb> directly
-    const SkSpan<const uint8_t> verbs = {
-        reinterpret_cast<const uint8_t*>(raw.verbs().data()),
-        raw.verbs().size(),
-    };
-
-    return SkPath::Make(raw.points(), verbs, raw.conics(), raw.fillType());
+    return SkPath::Raw(raw.points(), raw.verbs(), raw.conics(), raw.fillType());
 }
 
 static void check_path_is_raw(skiatest::Reporter* reporter,
@@ -108,3 +103,22 @@ DEF_TEST(pathrawshapes_oval, reporter) {
         check_path_is_raw(reporter, path, shape);
     }
 }
+
+DEF_TEST(pathrawshapes_rrect, reporter) {
+    const SkRect r = {0, 0, 4, 4};
+    const SkRRect rr = SkRRect::MakeRectXY(r, 1, 1);
+
+    for (auto dir : gDirections) {
+        SkPathRawShapes::RRect shape(rr, dir);
+
+        REPORTER_ASSERT(reporter, shape.bounds() == r);
+        REPORTER_ASSERT(reporter, shape.isConvex());
+        REPORTER_ASSERT(reporter, shape.segmentMasks() == (kLine_SkPathSegmentMask |
+                                                           kConic_SkPathSegmentMask));
+
+        const SkPath path = SkPath::RRect(rr, dir);
+
+        check_path_is_raw(reporter, path, shape);
+    }
+}
+
