@@ -5,25 +5,27 @@
  * found in the LICENSE file.
  */
 
-#include "experimental/rust_png/decoder/impl/SkPngRustCodec.h"
+#include "src/codec/SkPngRustCodec.h"
 
 #include <limits>
 #include <memory>
 #include <utility>
 
-#include "experimental/rust_png/ffi/FFI.rs.h"
-#include "experimental/rust_png/ffi/UtilsForFFI.h"
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkStream.h"
 #include "include/private/SkEncodedInfo.h"
+#include "include/private/SkHdrMetadata.h"
 #include "include/private/base/SkAssert.h"
 #include "include/private/base/SkSafe32.h"
 #include "include/private/base/SkTemplates.h"
 #include "modules/skcms/skcms.h"
+#include "rust/png/FFI.rs.h"
+#include "rust/png/UtilsForFFI.h"
 #include "src/base/SkAutoMalloc.h"
 #include "src/base/SkSafeMath.h"
 #include "src/codec/SkFrameHolder.h"
 #include "src/codec/SkParseEncodedOrigin.h"
+#include "src/codec/SkPngPriv.h"
 #include "src/codec/SkSwizzler.h"
 #include "src/core/SkRasterPipeline.h"
 #include "src/core/SkRasterPipelineOpList.h"
@@ -35,17 +37,27 @@
 
 namespace {
 
-SkEncodedInfo::Color ToColor(rust_png::ColorType colorType) {
-    // TODO(https://crbug.com/359279096): Take `sBIT` chunk into account to
-    // sometimes return `kXAlpha_Color` or `k565_Color`.  This may require
-    // a small PR to expose `sBIT` chunk from the `png` crate.
-
+SkEncodedInfo::Color ToColor(rust_png::ColorType colorType, const rust_png::Reader& reader) {
     switch (colorType) {
         case rust_png::ColorType::Grayscale:
             return SkEncodedInfo::kGray_Color;
         case rust_png::ColorType::Rgb:
+            if (reader.has_sbit_chunk()) {
+                SkSpan<const uint8_t> sBit = ToSkSpan(reader.get_sbit_chunk());
+                SkASSERT_RELEASE(sBit.size() == 3); // Verified in `png` crate in `fn parse_sbit`.
+                if (sBit[0] == 5 && sBit[1] == 6 && sBit[2] == 5) {
+                    return SkEncodedInfo::k565_Color;
+                }
+            }
             return SkEncodedInfo::kRGB_Color;
         case rust_png::ColorType::GrayscaleAlpha:
+            if (reader.has_sbit_chunk()) {
+                SkSpan<const uint8_t> sBit = ToSkSpan(reader.get_sbit_chunk());
+                SkASSERT_RELEASE(sBit.size() == 2); // Verified in `png` crate in `fn parse_sbit`.
+                if (sBit[0] == kGraySigBit_GrayAlphaIsJustAlpha && sBit[1] == 8) {
+                    return SkEncodedInfo::kXAlpha_Color;
+                }
+            }
             return SkEncodedInfo::kGrayAlpha_Color;
         case rust_png::ColorType::Rgba:
             return SkEncodedInfo::kRGBA_Color;
@@ -93,6 +105,21 @@ SkCodecAnimation::Blend ToBlend(rust_png::BlendOp op) {
             return SkCodecAnimation::Blend::kSrcOver;
     }
     SK_ABORT("Unexpected `rust_png::BlendOp`: %d", static_cast<int>(op));
+}
+
+SkColorSpacePrimaries ToSkColorSpacePrimaries(const rust_png::ColorSpacePrimaries& p) {
+    return SkColorSpacePrimaries({p.fRX, p.fRY, p.fGX, p.fGY, p.fBX, p.fBY, p.fWX, p.fWY});
+}
+
+skhdr::MasteringDisplayColorVolume ToSkMDCV(const rust_png::MasteringDisplayColorVolume& mdcv) {
+    return skhdr::MasteringDisplayColorVolume({
+        ToSkColorSpacePrimaries(mdcv.fDisplayPrimaries),
+        mdcv.fMaximumDisplayMasteringLuminance,
+        mdcv.fMinimumDisplayMasteringLuminance});
+}
+
+skhdr::ContentLightLevelInformation ToSkCLLI(const rust_png::ContentLightLevelInfo& clli) {
+    return skhdr::ContentLightLevelInformation({clli.fMaxCLL, clli.fMaxFALL});
 }
 
 std::unique_ptr<SkEncodedInfo::ICCProfile> CreateColorProfile(const rust_png::Reader& reader) {
@@ -160,15 +187,8 @@ std::unique_ptr<SkEncodedInfo::ICCProfile> CreateColorProfile(const rust_png::Re
         // so we match the behavior of Safari and Firefox instead (compat).
         return nullptr;
     }
-    float rx = 0.0;
-    float ry = 0.0;
-    float gx = 0.0;
-    float gy = 0.0;
-    float bx = 0.0;
-    float by = 0.0;
-    float wx = 0.0;
-    float wy = 0.0;
-    const bool got_chrm = reader.try_get_chrm(wx, wy, rx, ry, gx, gy, bx, by);
+    rust_png::ColorSpacePrimaries chrm;
+    const bool got_chrm = reader.try_get_chrm(chrm);
     if (!got_chrm) {
         // If there is no `cHRM` chunk then check if `gamma` is neutral (in PNG
         // / `SkNamedTransferFn::k2Dot2` sense).  `kPngGammaThreshold` mimics
@@ -191,7 +211,7 @@ std::unique_ptr<SkEncodedInfo::ICCProfile> CreateColorProfile(const rust_png::Re
     // Construct a color profile based on `cHRM` and `gAMA` chunks.
     skcms_Matrix3x3 toXYZD50;
     if (got_chrm) {
-        if (!skcms_PrimariesToXYZD50(rx, ry, gx, gy, bx, by, wx, wy, &toXYZD50)) {
+        if (!ToSkColorSpacePrimaries(chrm).toXYZD50(&toXYZD50)) {
             return nullptr;
         }
     } else {
@@ -218,11 +238,23 @@ std::unique_ptr<SkEncodedInfo::ICCProfile> CreateColorProfile(const rust_png::Re
 // Returns `nullopt` when input errors are encountered.
 std::optional<SkEncodedInfo> CreateEncodedInfo(const rust_png::Reader& reader) {
     rust_png::ColorType rustColor = reader.output_color_type();
-    SkEncodedInfo::Color skColor = ToColor(rustColor);
+    SkEncodedInfo::Color skColor = ToColor(rustColor, reader);
 
     std::unique_ptr<SkEncodedInfo::ICCProfile> profile = CreateColorProfile(reader);
     if (!SkPngCodecBase::isCompatibleColorProfileAndType(profile.get(), skColor)) {
         profile = nullptr;
+    }
+
+    skhdr::Metadata hdrMetadata;
+    {
+        rust_png::MasteringDisplayColorVolume rust_mdcv;
+        if (reader.try_get_mdcv_chunk(rust_mdcv)) {
+            hdrMetadata.setMasteringDisplayColorVolume(ToSkMDCV(rust_mdcv));
+        }
+        rust_png::ContentLightLevelInfo rust_clli;
+        if (reader.try_get_clli_chunk(rust_clli)) {
+            hdrMetadata.setContentLightLevelInformation(ToSkCLLI(rust_clli));
+        }
     }
 
     // Protect against large PNGs. See http://bugzil.la/251381 for more details.
@@ -245,8 +277,10 @@ std::optional<SkEncodedInfo> CreateEncodedInfo(const rust_png::Reader& reader) {
                                height,
                                skColor,
                                ToAlpha(rustColor, reader),
-                               reader.output_bits_per_component(),
-                               std::move(profile));
+                               reader.output_bits_per_component(), // bitsPerComponent
+                               reader.output_bits_per_component(), // colorDepth
+                               std::move(profile),
+                               hdrMetadata);
 }
 
 SkCodec::Result ToSkCodecResult(rust_png::DecodingResult rustResult) {
@@ -420,8 +454,8 @@ void blendAllRows(SkSpan<uint8_t> dstFrame,
     while (srcFrame.size() >= rowSize) {
         blendRow(dstFrame, srcFrame.first(rowSize), color, alpha);
 
-        dstFrame = dstFrame.subspan(rowStride);
-        srcFrame = srcFrame.subspan(rowStride);
+        srcFrame = srcFrame.subspan(std::min(rowStride, srcFrame.size()));
+        dstFrame = dstFrame.subspan(std::min(rowStride, dstFrame.size()));
     }
 }
 
@@ -751,7 +785,7 @@ SkCodec::Result SkPngRustCodec::startDecoding(const SkImageInfo& dstInfo,
             if (options.fSubset) {
                 decodingState->fPreblendBuffer.resize(encodedImageSize, 0x00);
             } else if (frame->getBlend() == SkCodecAnimation::Blend::kSrcOver) {
-                decodingState->fPreblendBuffer.resize(imageSize, 0x00);
+                decodingState->fPreblendBuffer.resize(decodingDst.fDst.size(), 0x00);
             }
         } else if (frame->getBlend() == SkCodecAnimation::Blend::kSrcOver) {
             decodingState->fPreblendBuffer.resize(rowSize, 0x00);
@@ -792,7 +826,7 @@ void SkPngRustCodec::expandDecodedInterlacedRow(SkSpan<uint8_t> dstFrame,
                                             dstBytesPerPixel * 8u);
     } else {
         fReader->expand_last_interlaced_row(rust::Slice<uint8_t>(dstFrame),
-                                            decodingDst.fDstRowStride,
+                                            dstRowStride,
                                             rust::Slice<const uint8_t>(srcRow),
                                             dstBytesPerPixel * 8u);
     }

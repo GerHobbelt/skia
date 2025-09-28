@@ -691,6 +691,18 @@ DEF_TEST(RustPngCodec_f16_trc_tables, r) {
     REPORTER_ASSERT_SUCCESSFUL_CODEC_RESULT(r, result);
 }
 
+DEF_TEST(RustPngCodec_crbug445556737, r) {
+    sk_sp<SkImage> image = DecodeLastFrame(r, "images/crbug445556737.png");
+    if (!image) {
+        return;
+    }
+
+    // The main test verification is that there are no assertion failures nor
+    // other crashes.  Cursory verification below is supplementary/secondary.
+    REPORTER_ASSERT(r, image->height() == 5);
+    REPORTER_ASSERT(r, image->width() == 5);
+}
+
 DEF_TEST(RustPngCodec_invalid_profile, r) {
     // This image has an gamma value of 0. For parity with Blink, we want to disregard
     // the ICC profile in this case and create the codec without it. This is different
@@ -784,4 +796,26 @@ DEF_TEST(RustPngCodec_subset, r) {
     // those each separately, then comparing to the full image decoded.
     test_subset_decode(r, "images/baby_tux.png");
     test_subset_decode(r, "images/plane_interlaced.png");
+}
+
+DEF_TEST(RustPngCodec_interlaced_animated_blending, r) {
+    std::unique_ptr<SkCodec> codec =
+        SkPngRustDecoderDecode(r, "images/interlaced-multiframe-with-blending.png");
+    REPORTER_ASSERT(r, codec);
+
+    // Use incrementalDecode for each frame of this image. This should not crash.
+    SkBitmap bm;
+    SkImageInfo info = codec->getInfo();
+    bm.allocPixels(info);
+    REPORTER_ASSERT(r, codec->getFrameCount() == 4);
+    for (int i = 0; i < codec->getFrameCount(); ++i) {
+        SkCodec::Options options;
+        options.fFrameIndex = i;
+        options.fPriorFrame = i - 1;
+        SkCodec::Result result;
+        result = codec->startIncrementalDecode(info, bm.getPixels(), bm.rowBytes(), &options);
+        REPORTER_ASSERT_SUCCESSFUL_CODEC_RESULT(r, result);
+        codec->incrementalDecode();
+        REPORTER_ASSERT_SUCCESSFUL_CODEC_RESULT(r, result);
+    }
 }
