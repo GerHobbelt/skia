@@ -1541,6 +1541,12 @@ public:
     }
 #endif
 
+    struct IterRec {
+        SkPathVerb            fVerb;
+        SkSpan<const SkPoint> fPoints;
+        float                 fConicWeight;
+    };
+
     /** \class SkPath::Iter
         Iterates through verb array, and associated SkPoint array and conic weight.
         Provides options to treat open contours as closed, and to ignore
@@ -1594,6 +1600,8 @@ public:
         */
         Verb next(SkPoint pts[4]);
 
+        std::optional<IterRec> next();
+
         /** Returns conic weight if next() returned kConic_Verb.
 
             If next() has not been called, or next() did not return kConic_Verb,
@@ -1625,17 +1633,18 @@ public:
         bool isClosedContour() const;
 
     private:
-        const SkPoint*  fPts;
-        const uint8_t*  fVerbs;
-        const uint8_t*  fVerbStop;
-        const SkScalar* fConicWeights;
-        SkPoint         fMoveTo;
-        SkPoint         fLastPt;
-        bool            fForceClose;
-        bool            fNeedClose;
-        bool            fCloseLine;
+        const SkPoint*          fPts;
+        const SkPathVerb*       fVerbs;
+        const SkPathVerb*       fVerbStop;
+        const SkScalar*         fConicWeights;
+        SkPoint                 fMoveTo;
+        SkPoint                 fLastPt;
+        std::array<SkPoint, 4>  fStorage;
+        bool                    fForceClose;
+        bool                    fNeedClose;
+        bool                    fCloseLine;
 
-        Verb autoClose(SkPoint pts[2]);
+        SkPathVerb autoClose(SkPoint pts[2]);
     };
 
 private:
@@ -1648,7 +1657,7 @@ private:
     class RangeIter {
     public:
         RangeIter() = default;
-        RangeIter(const uint8_t* verbs, const SkPoint* points, const SkScalar* weights)
+        RangeIter(const SkPathVerb* verbs, const SkPoint* points, const SkScalar* weights)
                 : fVerb(verbs), fPoints(points), fWeights(weights) {
             SkDEBUGCODE(fInitialPoints = fPoints;)
         }
@@ -1659,7 +1668,7 @@ private:
             return fVerb == that.fVerb;
         }
         RangeIter& operator++() {
-            auto verb = static_cast<SkPathVerb>(*fVerb++);
+            auto verb = *fVerb++;
             fPoints += pts_advance_after_verb(verb);
             if (verb == SkPathVerb::kConic) {
                 ++fWeights;
@@ -1672,7 +1681,7 @@ private:
             return copy;
         }
         SkPathVerb peekVerb() const {
-            return static_cast<SkPathVerb>(*fVerb);
+            return *fVerb;
         }
         std::tuple<SkPathVerb, const SkPoint*, const SkScalar*> operator*() const {
             SkPathVerb verb = this->peekVerb();
@@ -1706,7 +1715,7 @@ private:
             }
             SkUNREACHABLE;
         }
-        const uint8_t* fVerb = nullptr;
+        const SkPathVerb* fVerb = nullptr;
         const SkPoint* fPoints = nullptr;
         const SkScalar* fWeights = nullptr;
         SkDEBUGCODE(const SkPoint* fInitialPoints = nullptr;)
@@ -1750,6 +1759,8 @@ public:
             @return     next SkPath::Verb from verb array
         */
         Verb next(SkPoint[4]);
+
+        std::optional<IterRec> next();
 
         /** Returns next SkPath::Verb, but does not advance RawIter.
 
