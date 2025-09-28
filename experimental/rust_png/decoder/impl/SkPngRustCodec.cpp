@@ -764,7 +764,10 @@ SkCodec::Result SkPngRustCodec::onStartIncrementalDecode(const SkImageInfo& dstI
 }
 
 SkCodec::Result SkPngRustCodec::onIncrementalDecode(int* rowsDecoded) {
-    SkASSERT(fIncrementalDecodingState.has_value());
+    if (!fIncrementalDecodingState.has_value()) {
+        return kInvalidParameters;
+    }
+
     Result result = this->incrementalDecode(*fIncrementalDecodingState, rowsDecoded);
     if (result != kIncompleteInput) {
         // After successfully reading the whole row (`kSuccess`), and after a
@@ -962,7 +965,7 @@ SkCodec::Result SkPngRustCodec::FrameHolder::appendNewFrame(const rust_png::Read
     }
     int id = static_cast<int>(fFrames.size());
 
-    if (reader.has_fctl_chunk()) {
+    if (reader.has_actl_chunk() && reader.has_fctl_chunk()) {
         if (!fFrames.empty()) {
             // Having `fcTL` for a new frame means that the previous frame has been
             // fully received (since all of the previous frame's `fdAT` / `IDAT`
@@ -978,7 +981,7 @@ SkCodec::Result SkPngRustCodec::FrameHolder::appendNewFrame(const rust_png::Read
         return result;
     }
 
-    SkASSERT(!reader.has_actl_chunk());
+    SkASSERT(!reader.has_actl_chunk() || !reader.has_fctl_chunk());
     SkASSERT(id == 0);
     fFrames.emplace_back(id, info.alpha());
     SkFrame& frame = fFrames.back();
