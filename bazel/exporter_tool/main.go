@@ -118,6 +118,13 @@ var gniExportDescs = []exporter.GNIExportDesc{
 				"//src/text:text_hdrs",
 				"//src/text:text_srcs",
 			}},
+		{Var: "skia_legacy_pathops_public",
+			Rules: []string{"//include/pathops:public_hdrs"}},
+		{Var: "skia_legacy_pathops_sources",
+			Rules: []string{
+				"//src/pathops:_pathops_hdrs",
+				"//src/pathops:_pathops_srcs",
+			}},
 		{Var: "skia_encode_public",
 			Rules: []string{"//include/encode:encode_hdrs"}},
 		{Var: "skia_encode_srcs",
@@ -210,7 +217,7 @@ var gniExportDescs = []exporter.GNIExportDesc{
 			}},
 		{Var: "skia_ports_fontmgr_android_sources",
 			Rules: []string{
-				"//src/ports:fontmgr_android_freetype",
+				"//src/ports:fontmgr_android",
 			}},
 		{Var: "skia_ports_fontmgr_android_ndk_public",
 			Rules: []string{
@@ -218,7 +225,7 @@ var gniExportDescs = []exporter.GNIExportDesc{
 			}},
 		{Var: "skia_ports_fontmgr_android_ndk_sources",
 			Rules: []string{
-				"//src/ports:fontmgr_android_ndk_freetype",
+				"//src/ports:fontmgr_android_ndk",
 			}},
 		{Var: "skia_ports_fontmgr_custom_sources",
 			Rules: []string{
@@ -265,8 +272,7 @@ var gniExportDescs = []exporter.GNIExportDesc{
 			}},
 		{Var: "skia_ports_fontmgr_fontconfig_sources",
 			Rules: []string{
-				"//src/ports:fontconfig_support",
-				"//src/ports:fontmgr_fontconfig_freetype",
+				"//src/ports:fontmgr_fontconfig",
 			}},
 		{Var: "skia_ports_fontmgr_fontations_public",
 			Rules: []string{
@@ -612,15 +618,6 @@ var gniExportDescs = []exporter.GNIExportDesc{
 			Rules: []string{
 				"//modules/svg/src:private_hdrs",
 				"//modules/svg/src:srcs",
-			}},
-	}},
-	{GNI: "modules/pathops/pathops.gni", Vars: []exporter.GNIFileListExportDesc{
-		{Var: "skia_pathops_public",
-			Rules: []string{"//modules/pathops/include:hdrs"}},
-		{Var: "skia_pathops_sources",
-			Rules: []string{
-				"//modules/pathops/src:core_hdrs",
-				"//modules/pathops/src:core_srcs",
 			}},
 	}},
 	{GNI: "modules/bentleyottmann/bentleyottmann.gni", Vars: []exporter.GNIFileListExportDesc{
