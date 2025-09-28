@@ -1019,7 +1019,7 @@ SkPath& SkPath::addRRect(const SkRRect &rrect, SkPathDirection dir, unsigned sta
 
         if (isRRect) {
             SkPathRef::Editor ed(&fPathRef);
-            ed.setIsRRect(dir == SkPathDirection::kCCW, startIndex % 8);
+            ed.setIsRRect(dir, startIndex % 8);
         }
     }
 
@@ -1085,7 +1085,7 @@ SkPath& SkPath::addOval(const SkRect &oval, SkPathDirection dir, unsigned startP
 
     if (isOval) {
         SkPathRef::Editor ed(&fPathRef);
-        ed.setIsOval(SkPathDirection::kCCW == dir, startPointIndex % 4);
+        ed.setIsOval(dir, startPointIndex % 4);
     }
     return *this;
 }
@@ -1583,7 +1583,7 @@ static void subdivide_cubic_to(SkPath* path, const SkPoint pts[4],
     }
 }
 
-void SkPath::transform(const SkMatrix& matrix, SkPath* dst, SkApplyPerspectiveClip pc) const {
+void SkPath::transform(const SkMatrix& matrix, SkPath* dst) const {
     if (matrix.isIdentity()) {
         if (dst != nullptr && dst != this) {
             *dst = *this;
@@ -1602,9 +1602,7 @@ void SkPath::transform(const SkMatrix& matrix, SkPath* dst, SkApplyPerspectiveCl
 
         SkPath clipped;
         const SkPath* src = this;
-        if (pc == SkApplyPerspectiveClip::kYes &&
-            SkPathPriv::PerspectiveClip(*this, matrix, &clipped))
-        {
+        if (SkPathPriv::PerspectiveClip(*this, matrix, &clipped)) {
             src = &clipped;
         }
 
@@ -3607,8 +3605,8 @@ static SkPath clip(const SkPath& path, const SkHalfPlane& plane) {
         return SkPath();
     }
 
-    SkPath rotated;
-    path.transform(*inv, &rotated);
+    SkPathBuilder rotated(path);
+    rotated.transform(*inv);
     if (!rotated.isFinite()) {
         return SkPath();
     }

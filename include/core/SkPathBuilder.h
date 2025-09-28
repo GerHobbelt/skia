@@ -855,8 +855,13 @@ public:
         @param matrix  SkMatrix to apply to SkPath
         @param pc      whether to apply perspective clipping
     */
-    SkPathBuilder& transform(const SkMatrix& matrix,
-                             SkApplyPerspectiveClip pc = SkApplyPerspectiveClip::kYes);
+    SkPathBuilder& transform(const SkMatrix& matrix);
+
+#ifdef SK_SUPPORT_LEGACY_APPLYPERSPECTIVECLIP
+    SkPathBuilder& transform(const SkMatrix& matrix, SkApplyPerspectiveClip) {
+        return this->transform(matrix);
+    }
+#endif
 
     /*
      *  Returns true if the builder is empty, or all of its points are finite.
@@ -924,6 +929,9 @@ public:
     SkSpan<const SkPathVerb> verbs() const {
         return fVerbs;
     }
+    SkSpan<const float> conicWeights() const {
+        return fConicWeights;
+    }
 
     SkPathBuilder& addRaw(const SkPathRaw&);
 
@@ -949,7 +957,7 @@ private:
     };
     IsA fIsA      = kIsA_JustMoves;
     int fIsAStart = -1;     // tracks direction iff fIsA is not unknown
-    bool fIsACCW  = false;  // tracks direction iff fIsA is not unknown
+    SkPathDirection fIsADirection = SkPathDirection::kCW;   // just so it has a value
 
     // called right before we add a (non-move) verb
     void ensureMove() {
