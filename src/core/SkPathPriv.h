@@ -252,9 +252,6 @@ public:
         return !(bounds.fLeft >= -max && bounds.fTop >= -max &&
                  bounds.fRight <= max && bounds.fBottom <= max);
     }
-    static bool TooBigForMath(const SkPath& path) {
-        return TooBigForMath(path.getBounds());
-    }
 
     // Returns number of valid points for each SkPath::Iter verb
     static int PtsInIter(unsigned verb) {
@@ -410,6 +407,12 @@ public:
 
     static void ReversePathTo(SkPathBuilder* builder, const SkPath& reverseMe) {
         builder->privateReversePathTo(reverseMe);
+    }
+
+    static SkPath ReversePath(const SkPath& reverseMe) {
+        SkPathBuilder bu;
+        bu.privateReverseAddPath(reverseMe);
+        return bu.detach();
     }
 
     static std::optional<SkPoint> GetPoint(const SkPathBuilder& builder, int index) {

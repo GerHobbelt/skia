@@ -61,6 +61,7 @@
 #include "src/core/SkMask.h"
 #include "src/core/SkMaskFilterBase.h"
 #include "src/core/SkPaintPriv.h"
+#include "src/core/SkPathPriv.h"
 #include "src/core/SkRasterClip.h"
 #include "src/core/SkSpecialImage.h"
 #include "src/core/SkStrikeSpec.h"
@@ -291,7 +292,11 @@ static void set_style(SkTCopyOnFirstWrite<SkPaint>* paint, SkPaint::Style style)
 static bool calculate_inverse_path(const SkRect& bounds, const SkPath& invPath,
                                    SkPath* outPath) {
     SkASSERT(invPath.isInverseFillType());
-    return Op(SkPath::Rect(bounds), invPath, kIntersect_SkPathOp, outPath);
+    if (auto result = Op(SkPath::Rect(bounds), invPath, kIntersect_SkPathOp)) {
+        *outPath = *result;
+        return true;
+    }
+    return false;
 }
 
 sk_sp<SkDevice> SkPDFDevice::createDevice(const CreateInfo& cinfo, const SkPaint* layerPaint) {
@@ -439,7 +444,9 @@ void SkPDFDevice::drawAnnotation(const SkRect& rect, const char key[], SkData* v
     // Convert to path to handle non-90-degree rotations.
     SkPath path = SkPath::Rect(rect).makeTransform(this->localToDevice());
     SkPath clip = SkClipStack_AsPath(this->cs());
-    Op(clip, path, kIntersect_SkPathOp, &path);
+    if (auto result = Op(clip, path, kIntersect_SkPathOp)) {
+        path = *result;
+    }
     // PDF wants a rectangle only.
     SkRect transformedRect = pageXform.mapRect(path.getBounds());
     if (transformedRect.isEmpty()) {
@@ -597,11 +604,11 @@ void SkPDFDevice::internalDrawPathWithFilter(const SkClipStack& clipStack,
                                      ? SkStrokeRec::kFill_InitStyle
                                      : SkStrokeRec::kHairline_InitStyle;
     builder.transform(ctm);
-    SkPath path = builder.detach();
+    SkPathRaw pathRaw = SkPathPriv::Raw(builder);
 
     SkIRect bounds = clipStack.bounds(this->bounds()).roundOut();
     SkMaskBuilder sourceMask;
-    if (!skcpu::DrawToMask(path,
+    if (!skcpu::DrawToMask(pathRaw,
                            bounds,
                            paint->getMaskFilter(),
                            &SkMatrix::I(),
@@ -636,7 +643,7 @@ void SkPDFDevice::internalDrawPathWithFilter(const SkClipStack& clipStack,
             maskDevice->makeFormXObjectFromDevice(dstMaskBounds, true), false,
             SkPDFGraphicState::kLuminosity_SMaskMode, fDocument), content.stream());
     SkPDFUtils::AppendRectangle(SkRect::Make(dstMaskBounds), content.stream());
-    SkPDFUtils::PaintPath(SkPaint::kFill_Style, path.getFillType(), content.stream());
+    SkPDFUtils::PaintPath(SkPaint::kFill_Style, pathRaw.fillType(), content.stream());
     this->clearMaskOnGraphicState(content.stream());
 }
 
