@@ -24,7 +24,7 @@ var deps = deps_parser.DepsEntries{
 	},
 	"chromium.googlesource.com/angle/angle": {
 		Id:      "chromium.googlesource.com/angle/angle",
-		Version: "db33baf4eb0d7954f0110cddc30acb9cdc12e2d4",
+		Version: "5fd79e6a2ce891a7e4e965631d4b53e921170638",
 		Path:    "third_party/externals/angle2",
 	},
 	"chromium.googlesource.com/chromium/deps/icu": {
@@ -47,9 +47,14 @@ var deps = deps_parser.DepsEntries{
 		Version: "729495f2ffa69080907780591fa2a630b2556e98",
 		Path:    "buildtools",
 	},
+	"chromium.googlesource.com/chromium/src/third_party/abseil-cpp": {
+		Id:      "chromium.googlesource.com/chromium/src/third_party/abseil-cpp",
+		Version: "04dc59d2c83238cb1fcb49083e5e416643a899ce",
+		Path:    "third_party/externals/abseil-cpp",
+	},
 	"chromium.googlesource.com/chromium/src/third_party/freetype2": {
 		Id:      "chromium.googlesource.com/chromium/src/third_party/freetype2",
-		Version: "5d4e649f740c675426fbe4cdaffc53ee2a4cb954",
+		Version: "7172bd11badd468f6a86dba0b1769d624ead885c",
 		Path:    "third_party/externals/freetype",
 	},
 	"chromium.googlesource.com/chromium/src/third_party/jinja2": {
@@ -109,12 +114,12 @@ var deps = deps_parser.DepsEntries{
 	},
 	"chromium.googlesource.com/external/github.com/harfbuzz/harfbuzz": {
 		Id:      "chromium.googlesource.com/external/github.com/harfbuzz/harfbuzz",
-		Version: "ca3cd48fa3e06fa81d7c8a3f716cca44ed2de26a",
+		Version: "08b52ae2e44931eef163dbad71697f911fadc323",
 		Path:    "third_party/externals/harfbuzz",
 	},
 	"chromium.googlesource.com/external/github.com/libexpat/libexpat": {
 		Id:      "chromium.googlesource.com/external/github.com/libexpat/libexpat",
-		Version: "624da0f593bb8d7e146b9f42b06d8e6c80d032a3",
+		Version: "8e49998f003d693213b538ef765814c7d21abada",
 		Path:    "third_party/externals/expat",
 	},
 	"chromium.googlesource.com/external/github.com/unicode-org/icu4x": {
@@ -149,7 +154,7 @@ var deps = deps_parser.DepsEntries{
 	},
 	"dawn.googlesource.com/dawn": {
 		Id:      "dawn.googlesource.com/dawn",
-		Version: "1a81a31c86f24b217d6396bc0a4c796590fffc43",
+		Version: "be90a8f836d3a41eae2d8a5152f24b54d7469599",
 		Path:    "third_party/externals/dawn",
 	},
 	"infra/3pp/tools/ninja": {
@@ -196,11 +201,6 @@ var deps = deps_parser.DepsEntries{
 		Id:      "skia.googlesource.com/external/github.com/KhronosGroup/SPIRV-Tools",
 		Version: "783d7033613cedaa7147d0700b517abc5c32312d",
 		Path:    "third_party/externals/spirv-tools",
-	},
-	"skia.googlesource.com/external/github.com/abseil/abseil-cpp": {
-		Id:      "skia.googlesource.com/external/github.com/abseil/abseil-cpp",
-		Version: "65a55c2ba891f6d2492477707f4a2e327a0b40dc",
-		Path:    "third_party/externals/abseil-cpp",
 	},
 	"skia.googlesource.com/external/github.com/emscripten-core/emsdk": {
 		Id:      "skia.googlesource.com/external/github.com/emscripten-core/emsdk",
@@ -249,7 +249,7 @@ var deps = deps_parser.DepsEntries{
 	},
 	"swiftshader.googlesource.com/SwiftShader": {
 		Id:      "swiftshader.googlesource.com/SwiftShader",
-		Version: "930d46d31b5d637f313fd5ef55da2bbf053c26c1",
+		Version: "96085ee3c6cc7bbb839880279efc85cbf122ec6b",
 		Path:    "third_party/externals/swiftshader",
 	},
 }

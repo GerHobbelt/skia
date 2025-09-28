@@ -16,6 +16,7 @@
 #include "include/private/base/SkAssert.h"
 #include "include/private/base/SkDebug.h"
 #include "include/private/base/SkSpan_impl.h"
+#include "src/base/SkEnumBitMask.h"
 #include "src/gpu/BlendFormula.h"
 #include "src/gpu/graphite/Caps.h"
 #include "src/gpu/graphite/ComputeTypes.h"
@@ -54,8 +55,8 @@ UniquePaintParamsID ExtractPaintData(Recorder* recorder,
                           local2Dev,
                           targetColorInfo,
                           geometry.isShape() || geometry.isEdgeAAQuad()
-                                  ? KeyContext::OptimizeSampling::kYes
-                                  : KeyContext::OptimizeSampling::kNo,
+                                  ? KeyGenFlags::kDefault
+                                  : KeyGenFlags::kDisableSamplingOptimization,
                           p.color());
     p.toKey(keyContext, builder, gatherer);
 
@@ -170,7 +171,8 @@ std::string GetPipelineLabel(const ShaderCodeDictionary* dict,
     label += " + ";
     label += renderStep->name();
     label += " + ";
-    label += dict->idToString(paintID).c_str(); // will be "(empty)" for depth-only draws
+    // the shader portion will be "(empty)" for depth-only draws
+    label += dict->idToString(paintID).c_str();
     return label;
 }
 

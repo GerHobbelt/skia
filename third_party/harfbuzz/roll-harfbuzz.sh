@@ -84,6 +84,12 @@ check_all_files_are_categorized() {
   )
 }
 
+update_bazel_patch() {
+  STEP="Update Bazel patch" &&
+  python3 tools/generate_patches.py "${HB_BUILD_DIR}/config-override.h" config-override.h > bazel/external/harfbuzz/config_files.patch &&
+  git add bazel/external/harfbuzz/config_files.patch
+}
+
 commit() {
   STEP="commit" &&
   HB_PREVIOUS_REV_SHORT=$(expr substr "${HB_PREVIOUS_REV}" 1 8) &&
@@ -102,5 +108,6 @@ rolldeps "$@" &&
 rollbazel &&
 rolldepsgen &&
 check_all_files_are_categorized &&
+update_bazel_patch &&
 commit &&
 true || { echo "Failed step ${STEP}"; exit 1; }

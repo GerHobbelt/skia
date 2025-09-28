@@ -477,28 +477,29 @@ void GradientShaderBlocks::AddBlock(const KeyContext& keyContext,
 
 //--------------------------------------------------------------------------------------------------
 
-namespace {
-
-void add_localmatrixshader_uniform_data(const ShaderCodeDictionary* dict,
-                                        const SkM44& localMatrix,
-                                        PipelineDataGatherer* gatherer) {
-    BEGIN_WRITE_UNIFORMS(gatherer, dict, BuiltInCodeSnippetID::kLocalMatrixShader)
-
-    gatherer->write(localMatrix);
-}
-
-} // anonymous namespace
-
 void LocalMatrixShaderBlock::BeginBlock(const KeyContext& keyContext,
                                         PaintParamsKeyBuilder* builder,
                                         PipelineDataGatherer* gatherer,
                                         const LMShaderData& lmShaderData) {
+    const ShaderCodeDictionary* dict = keyContext.dict();
+    const SkMatrix& m = lmShaderData.fLocalMatrix;
 
-    add_localmatrixshader_uniform_data(keyContext.dict(), lmShaderData.fLocalMatrix, gatherer);
+    if (lmShaderData.fLocalMatrix.hasPerspective()) {
+        // Perspective local matrices are rare enough and add enough extra instructions that it's
+        // worth specializing since it has to perform a per-pixel division.
+        builder->beginBlock(BuiltInCodeSnippetID::kLocalMatrixShaderPersp);
+        BEGIN_WRITE_UNIFORMS(gatherer, dict, BuiltInCodeSnippetID::kLocalMatrixShaderPersp)
+        gatherer->write(m);
+    } else {
+        // For an affine 2D transform, we only need to upload the upper 2x2 and XY translation.
+        builder->beginBlock(BuiltInCodeSnippetID::kLocalMatrixShader);
 
-    builder->beginBlock(lmShaderData.fHasPerspective
-                                ? BuiltInCodeSnippetID::kLocalMatrixShaderPersp
-                                : BuiltInCodeSnippetID::kLocalMatrixShader);
+        BEGIN_WRITE_UNIFORMS(gatherer, dict, BuiltInCodeSnippetID::kLocalMatrixShader)
+        // The upper 2x2 is expected to be in column major order, but SkMatrix is 3x3 row major.
+        gatherer->write(SkV4{m.getScaleX(), m.getSkewY(),
+                             m.getSkewX(),  m.getScaleY()});
+        gatherer->write(SkV2{m.getTranslateX(), m.getTranslateY()});
+    }
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -645,11 +646,11 @@ bool can_do_tiling_in_hw(const Caps* caps, const ImageShaderBlock::ImageData& im
 
 void add_sampler_data_to_key(PaintParamsKeyBuilder* builder, const SamplerDesc& samplerDesc) {
     if (samplerDesc.isImmutable()) {
-        builder->addData({samplerDesc.asSpan()});
+        builder->addData(samplerDesc.asSpan());
     } else {
         // Means we have a regular dynamic sampler. Append a default SamplerDesc to convey this,
         // allowing the key to maintain and convey sampler binding order.
-        builder->addData({{}});
+        builder->addData({});
     }
 }
 
@@ -659,11 +660,13 @@ ImageShaderBlock::ImageData::ImageData(const SkSamplingOptions& sampling,
                                        SkTileMode tileModeX,
                                        SkTileMode tileModeY,
                                        SkISize imgSize,
-                                       SkRect subset)
+                                       SkRect subset,
+                                       ImmutableSamplerInfo immutableSamplerInfo)
         : fSampling(sampling)
         , fTileModes{tileModeX, tileModeY}
         , fImgSize(imgSize)
-        , fSubset(subset) {
+        , fSubset(subset)
+        , fImmutableSamplerInfo(immutableSamplerInfo) {
 }
 
 void ImageShaderBlock::AddBlock(const KeyContext& keyContext,
@@ -704,7 +707,7 @@ void ImageShaderBlock::AddBlock(const KeyContext& keyContext,
     // immutable samplers, which must be passed in somehow.
     ImmutableSamplerInfo info = imgData.fTextureProxy
             ? caps->getImmutableSamplerInfo(imgData.fTextureProxy->textureInfo())
-            : ImmutableSamplerInfo{};
+            : imgData.fImmutableSamplerInfo;
     SamplerDesc samplerDesc {imgData.fSampling,
                              doTilingInHw ? imgData.fTileModes : kDefaultTileModes,
                              info};
@@ -772,6 +775,24 @@ void add_hw_yuv_image_uniform_data(const ShaderCodeDictionary* dict,
 
     gatherer->write(SkSize::Make(1.f/imgData.fImgSize.width(), 1.f/imgData.fImgSize.height()));
     gatherer->write(SkSize::Make(1.f/imgData.fImgSizeUV.width(), 1.f/imgData.fImgSizeUV.height()));
+    gatherer->write(imgData.fSubset);
+
+    SkPoint linearFilterUVInset = imgData.fLinearFilterUVInset;
+    // We sign-encode whether we need to adjust the UV coords by applying `fLinearFilterUVInset` for
+    // nearest neighbor filtering in `linearFilterUVInset.fX`.
+    if (imgData.fSampling.filter == SkFilterMode::kNearest) {
+        linearFilterUVInset.fX = -linearFilterUVInset.fX;
+    }
+    // We sign-encode whether we need clamping for subset or mismatched Y/UV plane size draws in
+    // `linearFilterUVInset.fY` - only clamp tiling modes are supported though.
+    if (!imgData.fSubset.contains(SkRect::Make(imgData.fImgSize)) ||
+        imgData.fImgSize != imgData.fImgSizeUV) {
+        SkASSERT(imgData.fTileModes.first == SkTileMode::kClamp &&
+                 imgData.fTileModes.second == SkTileMode::kClamp);
+        linearFilterUVInset.fY = -linearFilterUVInset.fY;
+    }
+    gatherer->write(linearFilterUVInset);
+
     for (int i = 0; i < 4; ++i) {
         gatherer->writeHalf(imgData.fChannelSelect[i]);
     }
@@ -786,6 +807,24 @@ void add_hw_yuv_no_swizzle_image_uniform_data(const ShaderCodeDictionary* dict,
 
     gatherer->write(SkSize::Make(1.f/imgData.fImgSize.width(), 1.f/imgData.fImgSize.height()));
     gatherer->write(SkSize::Make(1.f/imgData.fImgSizeUV.width(), 1.f/imgData.fImgSizeUV.height()));
+    gatherer->write(imgData.fSubset);
+
+    SkPoint linearFilterUVInset = imgData.fLinearFilterUVInset;
+    // We sign-encode whether we need to adjust the UV coords by applying `fLinearFilterUVInset` for
+    // nearest neighbor filtering in `linearFilterUVInset.fX`.
+    if (imgData.fSampling.filter == SkFilterMode::kNearest) {
+        linearFilterUVInset.fX = -linearFilterUVInset.fX;
+    }
+    // We sign-encode whether we need clamping for subset or mismatched Y/UV plane size draws in
+    // `linearFilterUVInset.fY` - only clamp tiling modes are supported though.
+    if (!imgData.fSubset.contains(SkRect::Make(imgData.fImgSize)) ||
+        imgData.fImgSize != imgData.fImgSizeUV) {
+        SkASSERT(imgData.fTileModes.first == SkTileMode::kClamp &&
+                 imgData.fTileModes.second == SkTileMode::kClamp);
+        linearFilterUVInset.fY = -linearFilterUVInset.fY;
+    }
+    gatherer->write(linearFilterUVInset);
+
     gatherer->writeHalf(imgData.fYUVtoRGBMatrix);
     SkV4 yuvToRGBXlateAlphaParam = {
         imgData.fYUVtoRGBTranslate.fX,
@@ -817,18 +856,12 @@ static bool can_do_yuv_tiling_in_hw(const Caps* caps,
                                           imgData.fTileModes.second == SkTileMode::kDecal)) {
         return false;
     }
-    // We depend on the subset code to handle cases where the UV dimensions times the
-    // subsample factors are not equal to the Y dimensions.
-    if (imgData.fImgSize != imgData.fImgSizeUV) {
-        return false;
-    }
-    // For nearest filtering when the Y texture size is larger than the UV texture size,
-    // we use linear filtering for the UV texture. In this case we also adjust pixel centers
-    // which may affect dependent texture reads.
-    if (imgData.fSampling.filter != imgData.fSamplingUV.filter) {
-        return false;
-    }
-    return imgData.fSubset.contains(SkRect::Make(imgData.fImgSize));
+    // Use the HW tiling shader variant if we're drawing the full rect with matched Y and UV plane
+    // sizes and any tiling mode, or if we're drawing a subset with clamp tiling mode.
+    return (imgData.fSubset.contains(SkRect::Make(imgData.fImgSize)) &&
+            imgData.fImgSize == imgData.fImgSizeUV) ||
+           (imgData.fTileModes.first == SkTileMode::kClamp &&
+            imgData.fTileModes.second == SkTileMode::kClamp);
 }
 
 static bool no_yuv_swizzle(const YUVImageShaderBlock::ImageData& imgData) {
@@ -1145,6 +1178,15 @@ void ColorSpaceTransformBlock::AddBlock(const KeyContext& keyContext,
 
     // Use a specialized shader if we don't need transfer function or gamut transforms.
     if (!(xformNeedsGamutOrXferFn || swizzleNeedsGamutTransform)) {
+        // When enabled, the most specialized is to do nothing at all. To simplify calling code,
+        // this adds a passthrough block vs. having callers know how to reconfigure their blocks.
+        if (SkToBool(keyContext.flags() & KeyGenFlags::kEnableIdentityColorSpaceXform) &&
+            data.fReadSwizzle == ReadSwizzle::kRGBA &&
+            !data.fSteps.fFlags.premul && !data.fSteps.fFlags.unpremul) {
+            builder->addBlock(BuiltInCodeSnippetID::kPriorOutput);
+            return;
+        }
+
         add_color_space_xform_premul_uniform_data(keyContext.dict(), data, gatherer);
         builder->addBlock(BuiltInCodeSnippetID::kColorSpaceXformPremul);
         return;
@@ -1378,9 +1420,10 @@ void add_children_to_key(const KeyContext& keyContext,
 
     using ChildType = SkRuntimeEffect::ChildType;
 
-    KeyContextWithScope childContext(keyContext, KeyContext::Scope::kRuntimeEffect);
     for (size_t index = 0; index < children.size(); ++index) {
         const SkRuntimeEffect::ChildPtr& child = children[index];
+        KeyContextForRuntimeEffect childContext(keyContext, effect, index);
+
         std::optional<ChildType> type = child.type();
         if (type == ChildType::kShader) {
             AddToKey(childContext, builder, gatherer, child.shader());
@@ -1434,8 +1477,8 @@ void add_children_to_key(const KeyContext& keyContext,
                                                                       dstCS,
                                                                       kUnpremul_SkAlphaType);
 
-        ColorSpaceTransformBlock::AddBlock(childContext, builder, gatherer, dstToLinear);
-        ColorSpaceTransformBlock::AddBlock(childContext, builder, gatherer, linearToDst);
+        ColorSpaceTransformBlock::AddBlock(keyContext, builder, gatherer, dstToLinear);
+        ColorSpaceTransformBlock::AddBlock(keyContext, builder, gatherer, linearToDst);
     }
 }
 
@@ -2056,8 +2099,7 @@ static void add_to_key(const KeyContext& keyContext,
     // hardware.
     bool samplingHasNoEffect = false;
     // Cubic sampling is will not filter the same as nearest even when pixel aligned.
-    if (keyContext.optimizeSampling() == KeyContext::OptimizeSampling::kYes &&
-        !newSampling.useCubic) {
+    if (!(keyContext.flags() & KeyGenFlags::kDisableSamplingOptimization || newSampling.useCubic)) {
         SkMatrix totalM = keyContext.local2Dev().asM33();
         if (keyContext.localMatrix()) {
             totalM.preConcat(*keyContext.localMatrix());
@@ -2084,7 +2126,11 @@ static void add_to_key(const KeyContext& keyContext,
                                                        keyContext.dstColorInfo().colorSpace(),
                                                        keyContext.dstColorInfo().alphaType());
 
-        if (imageToDraw->isAlphaOnly() && keyContext.scope() != KeyContext::Scope::kRuntimeEffect) {
+        if (imageToDraw->isAlphaOnly() &&
+            !(keyContext.flags() & KeyGenFlags::kDisableAlphaOnlyImageColorization)) {
+            // NOTE: Alpha is not affected by colorspace conversion to the dst, and the paint color
+            // is already xformed to the dst, but the ColorSpaceTransformBlock is necessary to apply
+            // any read swizzle, which is often necessary for alpha-only color types.
             Blend(keyContext, builder, gatherer,
                   /* addBlendToKey= */ [&] () -> void {
                       AddFixedBlendMode(keyContext, builder, gatherer, SkBlendMode::kDstIn);
