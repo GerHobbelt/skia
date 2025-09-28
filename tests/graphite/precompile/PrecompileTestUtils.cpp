@@ -19,7 +19,6 @@
 #include "src/gpu/graphite/PrecompileContextPriv.h"
 #include "src/gpu/graphite/RenderPassDesc.h"
 #include "src/gpu/graphite/RendererProvider.h"
-#include "tests/graphite/precompile/PaintOptionsBuilder.h"
 #include "tests/graphite/precompile/PrecompileTestUtils.h"
 #include "tools/graphite/UniqueKeyUtils.h"
 
@@ -34,7 +33,6 @@
 #include <set>
 
 using namespace skgpu::graphite;
-using namespace PaintOptionsUtils;
 using PrecompileShaders::ImageShaderFlags;
 
 using ::skgpu::graphite::DrawTypeFlags;
@@ -42,142 +40,6 @@ using ::skgpu::graphite::PaintOptions;
 using ::skgpu::graphite::RenderPassProperties;
 
 namespace PrecompileTestUtils {
-
-PaintOptions ImagePremulHWOnlyPlusColorSrcover() {
-    return Builder().blend().srcOver();
-}
-
-PaintOptions TransparentPaintImagePremulHWOnlyPlusColorSrcover() {
-    return Builder().transparent().blend().srcOver();
-}
-
-PaintOptions SolidSrcover() {
-    return Builder().srcOver();
-}
-
-PaintOptions LinearGradSmSrcover() {
-    return Builder().linearGrad(kSmall).srcOver();
-}
-
-PaintOptions LinearGradSRGBSmMedDitherSrcover() {
-    return Builder().linearGrad(kComplex).dither().srcOver();
-}
-
-PaintOptions TransparentPaintImagePremulHWAndClampSrcover() {
-    return Builder().transparent().hwImg(kPremul, kClamp).srcOver();
-}
-
-PaintOptions TransparentPaintImagePremulHWOnlyMatrixCFSrcover() {
-    return Builder().transparent().hwImg(kPremul).matrixCF().srcOver();
-}
-
-PaintOptions TransparentPaintImagePremulHWOnlyMatrixCFDitherSrcover() {
-    return Builder().transparent().hwImg(kPremul).matrixCF().dither().srcOver();
-}
-
-PaintOptions TransparentPaintImageSRGBHWOnlyMatrixCFDitherSrcover() {
-    return Builder().transparent().hwImg(kSRGB).matrixCF().dither().srcOver();
-}
-
-PaintOptions TransparentPaintImagePremulHWOnlySrcover() {
-    return Builder().transparent().hwImg(kPremul).srcOver();
-}
-
-PaintOptions TransparentPaintImageSRGBHWOnlySrcover() {
-    return Builder().transparent().hwImg(kSRGB).srcOver();
-}
-
-PaintOptions TransparentPaintSrcover() {
-    return Builder().transparent().srcOver();
-}
-
-PaintOptions SolidClearSrcSrcover() {
-    return Builder().clear().src().srcOver();
-}
-
-PaintOptions SolidSrcSrcover() {
-    return Builder().src().srcOver();
-}
-
-PaintOptions ImagePremulHWOnlyAndClampSrcover() {
-    return Builder().hwImg(kPremul, kClamp).srcOver();
-}
-
-PaintOptions ImagePremulHWOnlySrc() {
-    return Builder().hwImg(kPremul).src();
-}
-
-PaintOptions ImagePremulHWOnlySrcover() {
-    return Builder().hwImg(kPremul).srcOver();
-}
-
-PaintOptions ImagePremulClampNoCubicDstin() {
-    return Builder().hwImg(kPremul, kClamp).dstIn();
-}
-
-PaintOptions ImagePremulHWOnlyDstin() {
-    return Builder().hwImg(kPremul).dstIn();
-}
-
-PaintOptions YUVImageSRGBNoCubicSrcover() {
-    return Builder().yuv(kNoCubic).srcOver();
-}
-
-PaintOptions YUVImageSRGBSrcover() {
-    return Builder().yuv(kHWAndShader).srcOver();
-}
-
-PaintOptions ImagePremulNoCubicSrcSrcover() {
-    return Builder().hwImg(kPremul).src().srcOver();
-}
-
-PaintOptions ImageSRGBNoCubicSrc() {
-    return Builder().hwImg(kSRGB).src();
-}
-
-PaintOptions ImageAlphaHWOnlySrcover() {
-    return Builder().hwImg(kAlpha).srcOver();
-}
-
-PaintOptions ImageAlphaPremulHWOnlyMatrixCFSrcover() {
-    return Builder().hwImg(kAlpha).matrixCF().srcOver();
-}
-
-PaintOptions ImageAlphaSRGBHWOnlyMatrixCFSrcover() {
-    return Builder().hwImg(kAlphaSRGB).matrixCF().srcOver();
-}
-
-PaintOptions ImageAlphaNoCubicSrc() {
-    return Builder().hwImg(kAlpha, kRepeat).src();
-}
-
-PaintOptions ImageAlphaClampNoCubicSrc() {
-    return Builder().hwImg(kAlpha, kClamp).src();
-}
-
-PaintOptions ImagePremulHWOnlyPorterDuffCFSrcover() {
-    return Builder().hwImg(kPremul).porterDuffCF().srcOver();
-}
-
-PaintOptions ImagePremulHWOnlyMatrixCFSrcover() {
-    return Builder().hwImg(kPremul).matrixCF().srcOver();
-}
-
-PaintOptions ImageSRGBHWOnlyMatrixCFSrcover() {
-    return Builder().hwImg(kSRGB).matrixCF().srcOver();
-}
-
-PaintOptions ImagePremulHWOnlyMatrixCFDitherSrcover() {
-    return Builder().hwImg(kPremul).matrixCF().dither().srcOver();
-}
-
-PaintOptions ImageSRGBHWOnlyMatrixCFDitherSrcover() {
-    return Builder().hwImg(kSRGB).matrixCF().dither().srcOver();
-}
-
-PaintOptions ImageHWOnlySRGBSrcover() {
-    return Builder().hwImg(kSRGB).srcOver();
-}
 
 namespace {
 
@@ -202,8 +64,8 @@ public:
         static const SkString kCrosstalkAndChunk16x16Code(R"(
             uniform shader img;
             vec4 main(vec2 xy) {
-                float3 linear = toLinearSrgb(img.eval(0.25 * xy).rgb);
-                return float4(fromLinearSrgb(linear), 1.0);
+                float3 linear = img.eval(0.25 * xy).rgb;
+                return float4(linear, 1.0);
             }
         )");
 
@@ -230,12 +92,14 @@ public:
         fBlurEffect = makeEffect(kBlurCode, "RE_MouriMap_BlurEffect");
 
         static const SkString kTonemapCode(R"(
-            uniform shader img1;
-            uniform shader img2;
+            uniform shader image;
+            uniform shader lux;
             vec4 main(vec2 xy) {
-                float alpha = img1.eval(xy).r;
-                float3 linear = toLinearSrgb(img2.eval(0.5 * xy).rgb);
-                return float4(fromLinearSrgb(linear), alpha);
+                float localMax = lux.eval(xy * 0.4).r;
+                float4 rgba = image.eval(0.5 * xy);
+                float3 linear = rgba.rgb * 0.7;
+
+                return float4(linear, rgba.a);
             }
         )");
 
@@ -264,6 +128,9 @@ const MouriMap& MouriMap() {
 
 } // anonymous namespace
 
+// TODO(b/426601394): Update this to take an SkColorInfo for the input image.
+// The other MouriMap* precompile paint options should use a linear SkColorInfo
+// derived from this same input image.
 skgpu::graphite::PaintOptions MouriMapCrosstalkAndChunk16x16Passthrough() {
     SkColorInfo ci { kRGBA_8888_SkColorType, kPremul_SkAlphaType, nullptr };
     sk_sp<PrecompileShader> img = PrecompileShaders::Image(ImageShaderFlags::kExcludeCubic,
@@ -300,7 +167,7 @@ skgpu::graphite::PaintOptions MouriMapCrosstalkAndChunk16x16Premul() {
 }
 
 skgpu::graphite::PaintOptions MouriMapChunk8x8Effect() {
-    SkColorInfo ci { kRGBA_8888_SkColorType, kPremul_SkAlphaType, nullptr };
+    SkColorInfo ci { kRGBA_F16_SkColorType, kPremul_SkAlphaType, SkColorSpace::MakeSRGBLinear() };
     sk_sp<PrecompileShader> img = PrecompileShaders::Image(ImageShaderFlags::kExcludeCubic,
                                                            { &ci, 1 },
                                                            {});
@@ -316,7 +183,7 @@ skgpu::graphite::PaintOptions MouriMapChunk8x8Effect() {
 }
 
 skgpu::graphite::PaintOptions MouriMapBlur() {
-    SkColorInfo ci { kRGBA_8888_SkColorType, kPremul_SkAlphaType, nullptr };
+    SkColorInfo ci { kRGBA_F16_SkColorType, kPremul_SkAlphaType, SkColorSpace::MakeSRGBLinear() };
     sk_sp<PrecompileShader> img = PrecompileShaders::Image(ImageShaderFlags::kExcludeCubic,
                                                            { &ci, 1 },
                                                            {});
@@ -333,19 +200,25 @@ skgpu::graphite::PaintOptions MouriMapBlur() {
 
 skgpu::graphite::PaintOptions MouriMapToneMap() {
     SkColorInfo ci { kRGBA_8888_SkColorType, kPremul_SkAlphaType, nullptr };
-    sk_sp<PrecompileShader> img1 = PrecompileShaders::Image(ImageShaderFlags::kExcludeCubic,
-                                                            { &ci, 1 },
-                                                            {});
-    sk_sp<PrecompileShader> img2 = PrecompileShaders::Image(ImageShaderFlags::kExcludeCubic,
-                                                            { &ci, 1 },
+    sk_sp<PrecompileShader> input = PrecompileShaders::Image(ImageShaderFlags::kExcludeCubic,
+                                                             { &ci, 1 },
+                                                             {});
+
+    SkColorInfo luxCI { kRGBA_F16_SkColorType,
+                        kPremul_SkAlphaType,
+                        SkColorSpace::MakeSRGBLinear() };
+    sk_sp<PrecompileShader> lux = PrecompileShaders::Image(ImageShaderFlags::kExcludeCubic,
+                                                            { &luxCI, 1 },
                                                             {});
 
     sk_sp<PrecompileShader> toneMap = PrecompileRuntimeEffects::MakePrecompileShader(
             MouriMap().toneMapEffect(),
-            { { std::move(img1) }, { std::move(img2) } });
+            { { std::move(input) }, { std::move(lux) } });
+    sk_sp<PrecompileShader> inLinear =
+            toneMap->makeWithWorkingColorSpace(luxCI.refColorSpace());
 
     PaintOptions paintOptions;
-    paintOptions.setShaders({ std::move(toneMap) });
+    paintOptions.setShaders({ std::move(inLinear) });
     paintOptions.setBlendModes({ SkBlendMode::kSrc });
     return paintOptions;
 }
@@ -657,7 +530,8 @@ skgpu::graphite::PaintOptions MouriMapCrosstalkAndChunk16x16YCbCr247() {
             247,
             VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_2020,
             VK_SAMPLER_YCBCR_RANGE_ITU_NARROW,
-            VK_CHROMA_LOCATION_COSITED_EVEN);
+            VK_CHROMA_LOCATION_COSITED_EVEN,
+            /*pqCS=*/true);
 
     sk_sp<PrecompileShader> crosstalk = PrecompileRuntimeEffects::MakePrecompileShader(
             MouriMap().crosstalkAndChunk16x16Effect(),
@@ -929,13 +803,11 @@ void PipelineLabelInfoCollector::finalReport() {
 //   2) more than 40% of the generated Pipelines are in kCases
 void RunTest(skgpu::graphite::PrecompileContext* precompileContext,
              skiatest::Reporter* reporter,
-             SkSpan<const PrecompileSettings> precompileSettings,
+             const PrecompileSettings& settings,
              int precompileSettingsIndex,
              SkSpan<const PipelineLabel> cases,
              PipelineLabelInfoCollector* collector) {
     using namespace skgpu::graphite;
-
-    const PrecompileSettings& settings = precompileSettings[precompileSettingsIndex];
 
     precompileContext->priv().globalCache()->resetGraphicsPipelines();
 

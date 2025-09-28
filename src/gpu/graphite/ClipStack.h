@@ -8,16 +8,21 @@
 #ifndef skgpu_graphite_ClipStack_DEFINED
 #define skgpu_graphite_ClipStack_DEFINED
 
-#include "include/core/SkClipOp.h"
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkShader.h"
+#include "include/private/base/SkAssert.h"
 #include "include/private/base/SkTArray.h"
 #include "src/base/SkTBlockList.h"
 #include "src/gpu/graphite/DrawOrder.h"
 #include "src/gpu/graphite/DrawParams.h"
+#include "src/gpu/graphite/geom/Rect.h"
 #include "src/gpu/graphite/geom/Shape.h"
 #include "src/gpu/graphite/geom/Transform.h"
 
-class SkShader;
+#include <cstdint>
+
 class SkStrokeRec;
+enum class SkClipOp;
 
 namespace skgpu::graphite {
 
@@ -136,6 +141,8 @@ private:
     // TransformedShape is a lightweight wrapper that can convert these different types into a
     // common type that Simplify() can reason about.
     struct TransformedShape;
+    class DrawShape;
+
     // This captures which of the two elements in (A op B) would be required when they are combined,
     // where op is intersect or difference.
     enum class SimplifyResult {
