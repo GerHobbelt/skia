@@ -35,7 +35,7 @@ enum class SkPathConvexity;
 enum class SkPathFirstDirection;
 struct SkPathVerbAnalysis;
 
-// WIP -- define this locally, and fix call-sites to use SkPathBuilder (skbug.com/9000)
+// WIP -- define this locally, and fix call-sites to use SkPathBuilder (skbug.com/40040287)
 //#define SK_HIDE_PATH_EDIT_METHODS
 
 /** \class SkPath
@@ -1620,7 +1620,7 @@ public:
                     {conics, conicWeightCount},
                     fillType, isVolatile);
     }
-    static SkPath Polygonx(const SkPoint pts[], int count, bool isClosed,
+    static SkPath Polygon(const SkPoint pts[], int count, bool isClosed,
                           SkPathFillType fillType = SkPathFillType::kWinding,
                           bool isVolatile = false) {
         return Polygon({pts, count}, isClosed, fillType, isVolatile);

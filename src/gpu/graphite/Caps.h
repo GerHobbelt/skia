@@ -389,6 +389,23 @@ public:
      *   VK_EXT_extended_dynamic_state2.
      */
     bool useBasicDynamicState() const { return fUseBasicDynamicState; }
+    /**
+     * Whether all vertex input state is dynamic.
+     * This set corresponds to state from VK_EXT_vertex_input_dynamic_state.  This state is
+     * equivalently pulled out of the shaders pipeline via VK_EXT_graphics_pipeline_library
+     * (usePipelineLibraries()).
+     */
+    bool useVertexInputDynamicState() const { return fUseVertexInputDynamicState; }
+    /**
+     * Whether VK_EXT_graphics_pipeline_library should be used.  In this case, the "shaders" subset
+     * of the pipeline is compiled separately, then fast-linked with the vertex input and fragment
+     * output state to create the final library.  Currently, this is a detail of the Vulkan backend,
+     * which helps VkPipelineCache hits (because the shaders pipeline hits the cache, and blend
+     * state is patched in).  However, this is most useful once exposed to the front-end, such that
+     * it can track the (fewer) shaders pipeline separately, have the complete pipelines point to
+     * the shaders pipeline, avoid unnecessary cache look ups, and more.  (skbug.com/414645289)
+     */
+    bool usePipelineLibraries() const { return fUsePipelineLibraries; }
 
     skgpu::ShaderErrorHandler* shaderErrorHandler() const { return fShaderErrorHandler; }
 
@@ -554,6 +571,8 @@ protected:
     // to disable everything.  Eventually, these can be used to create fewer pipelines in the first
     // place (b/414645289).
     bool fUseBasicDynamicState = false;
+    bool fUseVertexInputDynamicState = false;
+    bool fUsePipelineLibraries = false;
 
 private:
     virtual bool onIsTexturable(const TextureInfo&) const = 0;

@@ -13,6 +13,7 @@
 #include "include/gpu/graphite/vk/VulkanGraphiteTypes.h"
 #include "include/gpu/vk/VulkanExtensions.h"
 #include "include/gpu/vk/VulkanTypes.h"
+#include "include/private/base/SkMath.h"
 #include "src/gpu/SwizzlePriv.h"
 #include "src/gpu/graphite/ContextUtils.h"
 #include "src/gpu/graphite/GraphicsPipelineDesc.h"
@@ -109,11 +110,11 @@ void VulkanCaps::init(const ContextOptions& contextOptions,
                         enabledFeatures,
                         &deviceProperties);
 
-    const VkPhysicalDeviceLimits& deviceLimits = deviceProperties.base.properties.limits;
-    const uint32_t vendorID = deviceProperties.base.properties.vendorID;
+    const VkPhysicalDeviceLimits& deviceLimits = deviceProperties.fBase.properties.limits;
+    const uint32_t vendorID = deviceProperties.fBase.properties.vendorID;
 
 #if defined(GPU_TEST_UTILS)
-    this->setDeviceName(deviceProperties.base.properties.deviceName);
+    this->setDeviceName(deviceProperties.fBase.properties.deviceName);
 #endif
 
     // Graphite requires Vulkan version 1.1 or later, which always has protected support. The
@@ -221,18 +222,35 @@ void VulkanCaps::init(const ContextOptions& contextOptions,
     fIsInputAttachmentReadCoherent =
             fSupportsRasterizationOrderColorAttachmentAccess || vendorID == kARM_VkVendor;
 
-    // TODO(skia:14639): We must force std430 array stride when using SSBOs since SPIR-V generation
+    // TODO(skbug.com/40045541): We must force std430 array stride when using SSBOs since SPIR-V generation
     // cannot handle mixed array strides being passed into functions.
     fShaderCaps->fForceStd430ArrayLayout =
             fStorageBufferSupport && fResourceBindingReqs.fStorageBufferLayout == Layout::kStd430;
 
+    // Avoid RelaxedPrecision with OpImageSampleImplicitLod due to driver bug with YCbCr sampling.
+    // (skbug.com/421927604)
+    fShaderCaps->fCannotUseRelaxedPrecisionOnImageSample = vendorID == kNvidia_VkVendor;
+
     fShaderCaps->fDualSourceBlendingSupport = enabledFeatures.fDualSrcBlend;
 
-    // Vulkan 1.0 dynamic state is always supported.  Dynamic state based on mandatory features of
+    // Vulkan 1.0 dynamic state is always supported.  Dynamic state based on features of
     // VK_EXT_extended_dynamic_state and VK_EXT_extended_dynamic_state2 are also considered basic
     // given the extensions' age and the fact that they are core since Vulkan 1.3.
     fUseBasicDynamicState =
             enabledFeatures.fExtendedDynamicState && enabledFeatures.fExtendedDynamicState2;
+
+    // Vertex input state depends on the main feature of
+    // VK_EXT_vertex_input_dynamic_state.
+    fUseVertexInputDynamicState = enabledFeatures.fVertexInputDynamicState;
+
+    // Graphics pipeline library usage depends on the main feature of
+    // VK_EXT_graphics_pipeline_library.  The graphicsPipelineLibraryFastLinking property indicates
+    // whether linking libraries is cheap, without which the extension is not very useful.  However,
+    // this property is currently ignored for known vendors that set it to false while link is still
+    // fast.
+    fUsePipelineLibraries =
+            enabledFeatures.fGraphicsPipelineLibrary &&
+            (deviceProperties.fGpl.graphicsPipelineLibraryFastLinking || vendorID == kARM_VkVendor);
 
     // Note: Do not add extension/feature checks after this; driver workarounds should be done last.
     if (!contextOptions.fDisableDriverCorrectnessWorkarounds) {
@@ -241,8 +259,8 @@ void VulkanCaps::init(const ContextOptions& contextOptions,
 
     // Note that format table initialization should be performed at the end of this method to ensure
     // all capability determinations are completed prior to populating the format tables.
-    this->initFormatTable(vkInterface, physDev, deviceProperties.base.properties);
-    this->initDepthStencilFormatTable(vkInterface, physDev, deviceProperties.base.properties);
+    this->initFormatTable(vkInterface, physDev, deviceProperties.fBase.properties);
+    this->initDepthStencilFormatTable(vkInterface, physDev, deviceProperties.fBase.properties);
 
     this->finishInitialization(contextOptions);
 }
@@ -314,6 +332,18 @@ VulkanCaps::EnabledFeatures VulkanCaps::getEnabledFeatures(
                     enabled.fExtendedDynamicState2 = feature->extendedDynamicState2;
                     break;
                 }
+                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_INPUT_DYNAMIC_STATE_FEATURES_EXT: {
+                    const auto* feature = reinterpret_cast<
+                            const VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT*>(pNext);
+                    enabled.fVertexInputDynamicState = feature->vertexInputDynamicState;
+                    break;
+                }
+                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT: {
+                    const auto* feature = reinterpret_cast<
+                            const VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT*>(pNext);
+                    enabled.fGraphicsPipelineLibrary = feature->graphicsPipelineLibrary;
+                    break;
+                }
                 default:
                     break;
             }
@@ -331,65 +361,72 @@ void VulkanCaps::getProperties(const skgpu::VulkanInterface* vkInterface,
                                const skgpu::VulkanExtensions* extensions,
                                const EnabledFeatures& features,
                                PhysicalDeviceProperties* props) {
-    props->base = {};
-    props->base.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    props->fBase = {};
+    props->fBase.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
 
-    props->driver = {};
-    props->driver.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+    props->fDriver = {};
+    props->fDriver.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+
+    props->fGpl = {};
+    props->fGpl.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_PROPERTIES_EXT;
 
     const bool hasDriverProperties =
             physicalDeviceVersion >= VK_API_VERSION_1_2 ||
             extensions->hasExtension(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME, 1);
     if (hasDriverProperties) {
-        AddToPNextChain(&props->base, &props->driver);
+        AddToPNextChain(&props->fBase, &props->fDriver);
     } else {
         SKGPU_LOG_W("VK_KHR_driver_properties is not enabled, driver workarounds cannot "
                     "be correctly applied");
     }
 
+    if (features.fGraphicsPipelineLibrary) {
+        AddToPNextChain(&props->fBase, &props->fGpl);
+    }
+
     // Graphite requires Vulkan version 1.1 or later, so vkGetPhysicalDeviceProperties2 should
     // always be available.
-    VULKAN_CALL(vkInterface, GetPhysicalDeviceProperties2(physDev, &props->base));
+    VULKAN_CALL(vkInterface, GetPhysicalDeviceProperties2(physDev, &props->fBase));
 
     // If this field is not filled, driver bug workarounds won't work correctly. It should always
     // be filled, unless filling it itself is a driver bug, or the Vulkan driver is too old. In
     // that case, make a guess of what the driver ID is, but the driver is likely to be too buggy to
     // be used by Graphite either way.
-    if (props->driver.driverID == 0) {
-        switch (props->base.properties.vendorID) {
+    if (props->fDriver.driverID == 0) {
+        switch (props->fBase.properties.vendorID) {
             case kAMD_VkVendor:
-                props->driver.driverID = VK_DRIVER_ID_AMD_PROPRIETARY;
+                props->fDriver.driverID = VK_DRIVER_ID_AMD_PROPRIETARY;
                 break;
             case kARM_VkVendor:
-                props->driver.driverID = VK_DRIVER_ID_ARM_PROPRIETARY;
+                props->fDriver.driverID = VK_DRIVER_ID_ARM_PROPRIETARY;
                 break;
             case kBroadcom_VkVendor:
-                props->driver.driverID = VK_DRIVER_ID_BROADCOM_PROPRIETARY;
+                props->fDriver.driverID = VK_DRIVER_ID_BROADCOM_PROPRIETARY;
                 break;
             case kGoogle_VkVendor:
-                props->driver.driverID = VK_DRIVER_ID_GOOGLE_SWIFTSHADER;
+                props->fDriver.driverID = VK_DRIVER_ID_GOOGLE_SWIFTSHADER;
                 break;
             case kImagination_VkVendor:
-                props->driver.driverID = VK_DRIVER_ID_IMAGINATION_PROPRIETARY;
+                props->fDriver.driverID = VK_DRIVER_ID_IMAGINATION_PROPRIETARY;
                 break;
             case kIntel_VkVendor:
 #ifdef SK_BUILD_FOR_WIN
-                props->driver.driverID = VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS;
+                props->fDriver.driverID = VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS;
 #else
-                props->driver.driverID = VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA;
+                props->fDriver.driverID = VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA;
 #endif
                 break;
             case kNvidia_VkVendor:
-                props->driver.driverID = VK_DRIVER_ID_NVIDIA_PROPRIETARY;
+                props->fDriver.driverID = VK_DRIVER_ID_NVIDIA_PROPRIETARY;
                 break;
             case kQualcomm_VkVendor:
-                props->driver.driverID = VK_DRIVER_ID_QUALCOMM_PROPRIETARY;
+                props->fDriver.driverID = VK_DRIVER_ID_QUALCOMM_PROPRIETARY;
                 break;
             case kSamsung_VkVendor:
-                props->driver.driverID = VK_DRIVER_ID_SAMSUNG_PROPRIETARY;
+                props->fDriver.driverID = VK_DRIVER_ID_SAMSUNG_PROPRIETARY;
                 break;
             case kVeriSilicon_VkVendor:
-                props->driver.driverID = VK_DRIVER_ID_VERISILICON_PROPRIETARY;
+                props->fDriver.driverID = VK_DRIVER_ID_VERISILICON_PROPRIETARY;
                 break;
             default:
                 // Unknown device, but this means no driver workarounds are provisioned for it so
@@ -411,21 +448,24 @@ void VulkanCaps::applyDriverCorrectnessWorkarounds(const PhysicalDevicePropertie
     androidAPIVersion = (strLength == 0) ? 0 : atoi(androidAPIVersionStr);
 #endif
 
-    const uint32_t vendorID = properties.base.properties.vendorID;
-    const VkDriverId driverID = properties.driver.driverID;
+    const uint32_t vendorID = properties.fBase.properties.vendorID;
+    const VkDriverId driverID = properties.fDriver.driverID;
     const skgpu::DriverVersion driverVersion =
-            skgpu::ParseVulkanDriverVersion(driverID, properties.base.properties.driverVersion);
+            skgpu::ParseVulkanDriverVersion(driverID, properties.fBase.properties.driverVersion);
 
     const bool isARM = skgpu::kARM_VkVendor == vendorID;
+    const bool isIntel = skgpu::kIntel_VkVendor == vendorID;
     const bool isQualcomm = skgpu::kQualcomm_VkVendor == vendorID;
 
     const bool isARMProprietary = isARM && VK_DRIVER_ID_ARM_PROPRIETARY == driverID;
+    const bool isIntelWindowsProprietary =
+            isIntel && VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS == driverID;
     const bool isQualcommProprietary = isQualcomm && VK_DRIVER_ID_QUALCOMM_PROPRIETARY == driverID;
 
     // All Mali Job-Manager based GPUs have maxDrawIndirectCount==1 and all Commans-Stream Front
     // GPUs have maxDrawIndirectCount>1.  This is used as proxy to detect JM GPUs.
     const bool isMaliJobManagerArch =
-            isARM && properties.base.properties.limits.maxDrawIndirectCount <= 1;
+            isARM && properties.fBase.properties.limits.maxDrawIndirectCount <= 1;
 
     // On Mali galaxy s7 we see lots of rendering issues when we suballocate VkImages.
     if (isARMProprietary && androidAPIVersion <= 28) {
@@ -459,6 +499,19 @@ void VulkanCaps::applyDriverCorrectnessWorkarounds(const PhysicalDevicePropertie
     //   relevant.
     if (avoidExtendedDynamicState) {
         fUseBasicDynamicState = false;
+    }
+
+    // Known bugs in vertex input dynamic state:
+    //
+    // - Intel windows driver, unknown if fixed: http://anglebug.com/42265637#comment9
+    // - Qualcomm drivers prior to 777:  http://anglebug.com/381384988
+    // - In ARM drivers prior to r48, vkCmdBindVertexBuffers2 applies strides to the wrong index
+    //   when the state is dynamic, according to the errata:
+    //   https://developer.arm.com/documentation/SDEN-3735689/0100/?lang=en
+    if (isIntelWindowsProprietary ||
+        (isARMProprietary && driverVersion < skgpu::DriverVersion(48, 0)) ||
+        (isQualcommProprietary && driverVersion < skgpu::DriverVersion(512, 777))) {
+        fUseVertexInputDynamicState = false;
     }
 }
 
@@ -1345,40 +1398,22 @@ void VulkanCaps::SupportedSampleCounts::initSampleCounts(const skgpu::VulkanInte
         return;
     }
 
-    VkSampleCountFlags flags = properties.sampleCounts;
-    if (flags & VK_SAMPLE_COUNT_1_BIT) {
-        fSampleCounts.push_back(1);
-    }
-    if (skgpu::kIntel_VkVendor == physProps.vendorID) {
-        // MSAA doesn't work well on Intel GPUs chromium:527565, chromium:983926
-        return;
-    }
-    if (flags & VK_SAMPLE_COUNT_2_BIT) {
-        fSampleCounts.push_back(2);
-    }
-    if (flags & VK_SAMPLE_COUNT_4_BIT) {
-        fSampleCounts.push_back(4);
-    }
-    if (flags & VK_SAMPLE_COUNT_8_BIT) {
-        fSampleCounts.push_back(8);
-    }
-    if (flags & VK_SAMPLE_COUNT_16_BIT) {
-        fSampleCounts.push_back(16);
-    }
     // Standard sample locations are not defined for more than 16 samples, and we don't need more
     // than 16. Omit 32 and 64.
+    fSampleCounts = properties.sampleCounts &
+                    (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_2_BIT | VK_SAMPLE_COUNT_4_BIT |
+                     VK_SAMPLE_COUNT_8_BIT | VK_SAMPLE_COUNT_16_BIT);
 }
 
 bool VulkanCaps::SupportedSampleCounts::isSampleCountSupported(int requestedCount) const {
     requestedCount = std::max(1, requestedCount);
-    for (int i = 0; i < fSampleCounts.size(); i++) {
-        if (fSampleCounts[i] == requestedCount) {
-            return true;
-        } else if (requestedCount < fSampleCounts[i]) {
-            return false;
-        }
+    // Non-power-of-two sample counts are never supported (but practically also never expected to be
+    // requested)
+    if (!SkIsPow2(requestedCount)) {
+        return false;
     }
-    return false;
+
+    return (fSampleCounts & requestedCount) != 0;
 }
 
 
@@ -1733,31 +1768,75 @@ std::pair<SkColorType, bool /*isRGBFormat*/> VulkanCaps::supportedReadPixelsColo
     return {kUnknown_SkColorType, false};
 }
 
-// 3 uint32s for the render step id, paint id, and write swizzle.
-static constexpr int kVulkanGraphicsPipelineKeyHeaderData32Count = 3;
+static constexpr uint32_t kFormatBits = 8;
+static constexpr uint32_t kSampleBits = 7;
+static constexpr uint32_t kLoadFromResolveBits = 1;
+
+static constexpr uint32_t kColorFormatOffset = 0;
+static constexpr uint32_t kColorNumSamplesOffset = kColorFormatOffset + kFormatBits;
+static constexpr uint32_t kDepthStencilFormatOffset = kColorNumSamplesOffset + kSampleBits;
+static constexpr uint32_t kDepthStencilNumSamplesOffset = kDepthStencilFormatOffset + kFormatBits;
+static constexpr uint32_t kLoadFromResolveOffset = kDepthStencilNumSamplesOffset + kSampleBits;
+
+static constexpr uint32_t kFormatMask = (1 << kFormatBits) - 1;
+static constexpr uint32_t kNumSamplesMask = (1 << kSampleBits) - 1;
+static constexpr uint32_t kLoadFromResolveMask = (1 << kLoadFromResolveBits) - 1;
+
+uint32_t VulkanCaps::getRenderPassDescKeyForPipeline(const RenderPassDesc& renderPassDesc) const {
+    // The render pass always has a color attachment, and maybe a depth-stencil attachment. An input
+    // attachment is always provided for compatibility purposes (even if not required). In
+    // truth, the existence of a resolve attachment or whether multisampled unresolve/resolve
+    // happens also does not affect the pipeline, but the render pass compatiblity rules are too
+    // restrictive. For that reason, one bit is used to indicate whether load-from-resolve is
+    // happening or not which informs everything else. Note that with
+    // VK_KHR_dynamic_rendering[_local_read] this bit is unneeded.
+    //
+    // The layout of the packed information is thus:
+    //
+    //     LSB                                                                     MSB
+    //     +-------------+--------------+----------+-----------+-----------------+---+
+    //     | ColorFormat | ColorSamples | DSFormat | DSSamples | LoadFromResolve | 0 |
+    //     +-------------+--------------+----------+-----------+-----------------+---+
+    //         8 bits         7 bits       8 bits     7 bits         1 bit
+    //
+    const auto& color = renderPassDesc.fColorAttachment;
+    const auto& depthStencil = renderPassDesc.fDepthStencilAttachment;
+    const bool loadMSAAFromResolve = RenderPassDescWillLoadMSAAFromResolve(renderPassDesc);
+
+    SkASSERT(color.fSampleCount <= kNumSamplesMask);
+    SkASSERT(depthStencil.fSampleCount <= kNumSamplesMask);
+
+    return (static_cast<uint32_t>(color.fFormat) << kColorFormatOffset) |
+           (color.fSampleCount << kColorNumSamplesOffset) |
+           (static_cast<uint32_t>(depthStencil.fFormat) << kDepthStencilFormatOffset) |
+           (depthStencil.fSampleCount << kDepthStencilNumSamplesOffset) |
+           (loadMSAAFromResolve << kLoadFromResolveOffset);
+}
+
+// 4 uint32s for the render step id, paint id, compatible render pass description, and write
+// swizzle.
+static constexpr int kPipelineKeyData32Count = 4;
+
+static constexpr int kPipelineKeyRenderStepIDIndex = 0;
+static constexpr int kPipelineKeyPaintParamsIDIndex = 1;
+static constexpr int kPipelineKeyRenderPassDescIndex = 2;
+static constexpr int kPipelineKeyWriteSwizzleIndex = 3;
 
 UniqueKey VulkanCaps::makeGraphicsPipelineKey(const GraphicsPipelineDesc& pipelineDesc,
                                               const RenderPassDesc& renderPassDesc) const {
     UniqueKey pipelineKey;
     {
-        VulkanRenderPass::Metadata rpMetadata{renderPassDesc, /*compatibleOnly=*/true};
-
-        // The uint32s needed for a RenderPass is variable number, so consult rpMetaData to
-        // determine how many to reserve.
         UniqueKey::Builder builder(
-                &pipelineKey,
-                get_pipeline_domain(),
-                kVulkanGraphicsPipelineKeyHeaderData32Count + rpMetadata.keySize(),
-                "GraphicsPipeline");
+                &pipelineKey, get_pipeline_domain(), kPipelineKeyData32Count, "GraphicsPipeline");
 
-        int idx = 0;
         // Add GraphicsPipelineDesc information
-        builder[idx++] = static_cast<uint32_t>(pipelineDesc.renderStepID());
-        builder[idx++] = pipelineDesc.paintParamsID().asUInt();
-        // Add RenderPass info relevant for pipeline creation that's not captured in RenderPass keys
-        builder[idx++] = renderPassDesc.fWriteSwizzle.asKey();
+        builder[kPipelineKeyRenderStepIDIndex] = static_cast<uint32_t>(pipelineDesc.renderStepID());
+        builder[kPipelineKeyPaintParamsIDIndex] = pipelineDesc.paintParamsID().asUInt();
         // Add RenderPassDesc information
-        rpMetadata.addToKey(builder, idx);
+        builder[kPipelineKeyRenderPassDescIndex] =
+                this->getRenderPassDescKeyForPipeline(renderPassDesc);
+        // Add RenderPass info relevant for pipeline creation that's not captured in RenderPass keys
+        builder[kPipelineKeyWriteSwizzleIndex] = renderPassDesc.fWriteSwizzle.asKey();
 
         builder.finish();
     }
@@ -1770,65 +1849,52 @@ bool VulkanCaps::extractGraphicsDescs(const UniqueKey& key,
                                       RenderPassDesc* renderPassDesc,
                                       const RendererProvider* rendererProvider) const {
     SkASSERT(key.domain() == get_pipeline_domain());
-    SkASSERT(key.dataSize() >= 4 * kVulkanGraphicsPipelineKeyHeaderData32Count);
+    SkASSERT(key.dataSize() == 4 * kPipelineKeyData32Count);
 
     const uint32_t* rawKeyData = key.data();
 
-    SkASSERT(RenderStep::IsValidRenderStepID(rawKeyData[0]));
-    RenderStep::RenderStepID renderStepID = static_cast<RenderStep::RenderStepID>(rawKeyData[0]);
+    SkASSERT(RenderStep::IsValidRenderStepID(rawKeyData[kPipelineKeyRenderStepIDIndex]));
+    RenderStep::RenderStepID renderStepID =
+            static_cast<RenderStep::RenderStepID>(rawKeyData[kPipelineKeyRenderStepIDIndex]);
 
-    SkDEBUGCODE(const RenderStep* renderStep = rendererProvider->lookup(renderStepID);)
-    *pipelineDesc = GraphicsPipelineDesc(renderStepID, UniquePaintParamsID(rawKeyData[1]));
+    SkDEBUGCODE(const RenderStep* renderStep =
+                        rendererProvider->lookup(renderStepID);)* pipelineDesc =
+            GraphicsPipelineDesc(renderStepID,
+                                 UniquePaintParamsID(rawKeyData[kPipelineKeyPaintParamsIDIndex]));
     SkASSERT(renderStep->performsShading() == pipelineDesc->paintParamsID().isValid());
 
+    const uint32_t rpDescBits = rawKeyData[kPipelineKeyRenderPassDescIndex];
+    TextureFormat colorFormat =
+            static_cast<TextureFormat>((rpDescBits >> kColorFormatOffset) & kFormatMask);
+    uint8_t colorSamples = SkTo<uint8_t>((rpDescBits >> kColorNumSamplesOffset) & kNumSamplesMask);
+
+    TextureFormat depthStencilFormat =
+            static_cast<TextureFormat>((rpDescBits >> kDepthStencilFormatOffset) & kFormatMask);
+    uint8_t depthStencilSamples =
+            SkTo<uint8_t>((rpDescBits >> kDepthStencilNumSamplesOffset) & kNumSamplesMask);
+
+    const bool loadFromResolve =
+            ((rpDescBits >> kLoadFromResolveOffset) & kLoadFromResolveMask) != 0;
+
+    // Recreate the RenderPassDesc.  If the color attachment is multisampled, a resolve attachment
+    // is necessarily present.  The resolve attachment's load op will be based on loadFromResolve.
+    SkASSERT(colorSamples == depthStencilSamples ||
+             depthStencilFormat == TextureFormat::kUnsupported);
     *renderPassDesc = {};
-    renderPassDesc->fWriteSwizzle = SwizzleCtorAccessor::Make(rawKeyData[2] & 0xFFFF);
-
-    const uint32_t attachmentCount = rawKeyData[3] & 0xFF;
-    const uint32_t subpassCount = rawKeyData[3] >> 8;
-    SkASSERT(key.dataSize() ==
-             4 * (kVulkanGraphicsPipelineKeyHeaderData32Count + 1 + (attachmentCount + 1) / 2 + 1));
-    SkASSERT(subpassCount == 1 || subpassCount == 2);
-
-    SkASSERT(attachmentCount <= 3);
-    AttachmentDesc attachments[3] = {};
-
-    for (uint32_t i = 0; i < attachmentCount; i++) {
-        uint32_t desc = rawKeyData[4 + i / 2];
-        if (i % 2 == 0) {
-            desc &= 0xFFFF;
-        } else if (i % 2 == 1) {
-            desc >>= 16;
-        }
-
-        attachments[i].fFormat = static_cast<TextureFormat>(desc >> 8);
-        attachments[i].fLoadOp = static_cast<LoadOp>(desc >> 6 & 0x3);
-        attachments[i].fStoreOp = static_cast<StoreOp>(desc >> 4 & 0x3);
-        attachments[i].fSampleCount = desc & 0xF;
+    renderPassDesc->fColorAttachment = {colorFormat, LoadOp::kClear, StoreOp::kStore, colorSamples};
+    renderPassDesc->fDepthStencilAttachment = {
+            depthStencilFormat, LoadOp::kClear, StoreOp::kDiscard, depthStencilSamples};
+    if (colorSamples > 1) {
+        renderPassDesc->fColorResolveAttachment = {colorFormat,
+                                                   loadFromResolve ? LoadOp::kLoad : LoadOp::kClear,
+                                                   StoreOp::kStore,
+                                                   /*fSampleCount=*/1};
+        renderPassDesc->fColorAttachment.fStoreOp = StoreOp::kDiscard;
     }
 
-    const uint32_t attachmentIndices = rawKeyData[3 + (attachmentCount + 1) / 2 + 1];
-    const uint32_t colorIndex = attachmentIndices & 0xFF;
-    const uint32_t resolveIndex = attachmentIndices >> 8 & 0xFF;
-    const uint32_t depthIndex = attachmentIndices >> 16 & 0xFF;
-
-    if (colorIndex < 3) {
-        renderPassDesc->fColorAttachment = attachments[colorIndex];
-    }
-    if (resolveIndex < 3) {
-        renderPassDesc->fColorResolveAttachment = attachments[resolveIndex];
-
-        const bool loadMSAAFromResolve = subpassCount == 2;
-        if (loadMSAAFromResolve) {
-            renderPassDesc->fColorResolveAttachment.fLoadOp = LoadOp::kLoad;
-            renderPassDesc->fColorResolveAttachment.fStoreOp = StoreOp::kStore;
-        }
-    }
-    if (depthIndex < 3) {
-        renderPassDesc->fDepthStencilAttachment = attachments[depthIndex];
-    }
-
-    renderPassDesc->fSampleCount = renderPassDesc->fColorAttachment.fSampleCount;
+    renderPassDesc->fSampleCount = colorSamples;
+    renderPassDesc->fWriteSwizzle =
+            SwizzleCtorAccessor::Make(rawKeyData[kPipelineKeyWriteSwizzleIndex]);
     renderPassDesc->fDstReadStrategy = this->getDstReadStrategy();
 
     return true;
