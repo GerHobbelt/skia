@@ -167,6 +167,7 @@ VKAPI_ATTR VkBool32 VKAPI_CALL DebugReportCallback(
 static bool should_include_extension(const char* extensionName) {
     const char* kValidExtensions[] = {
             // single merged layer
+            VK_ARM_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXTENSION_NAME,
             VK_EXT_BLEND_OPERATION_ADVANCED_EXTENSION_NAME,
             VK_EXT_CONSERVATIVE_RASTERIZATION_EXTENSION_NAME,
             VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
@@ -178,11 +179,13 @@ static bool should_include_extension(const char* extensionName) {
             VK_EXT_FRAME_BOUNDARY_EXTENSION_NAME,
             VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME,
             VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
+            VK_EXT_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXTENSION_NAME,
             VK_EXT_RGBA10X6_FORMATS_EXTENSION_NAME,
             VK_KHR_BIND_MEMORY_2_EXTENSION_NAME,
             VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME,
             VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME,
             VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME,
+            VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME,
             VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME,
             VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
             VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME,
@@ -477,6 +480,19 @@ static bool setup_features(const skgpu::VulkanGetProc& getProc, VkInstance inst,
         tailPNext = &protectedMemoryFeatures->pNext;
     }
 
+    VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT* rasterOrder = nullptr;
+    if (extensions->hasExtension(VK_EXT_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXTENSION_NAME, 1) ||
+        extensions->hasExtension(VK_ARM_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXTENSION_NAME, 1)) {
+        rasterOrder =
+                (VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT*)sk_malloc_throw(
+                        sizeof(VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT));
+        rasterOrder->sType =
+                VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_FEATURES_EXT;
+        rasterOrder->pNext = nullptr;
+        *tailPNext = rasterOrder;
+        tailPNext = &rasterOrder->pNext;
+    }
+
     VkPhysicalDeviceBlendOperationAdvancedFeaturesEXT* blend = nullptr;
     if (extensions->hasExtension(VK_EXT_BLEND_OPERATION_ADVANCED_EXTENSION_NAME, 2)) {
         blend = (VkPhysicalDeviceBlendOperationAdvancedFeaturesEXT*) sk_malloc_throw(
@@ -570,6 +586,12 @@ static bool setup_features(const skgpu::VulkanGetProc& getProc, VkInstance inst,
         grVkGetPhysicalDeviceFeatures2KHR(physDev, features);
     }
 
+    // Disable depth/stencil coherence even if supported, in case it comes with a perf cost.
+    if (rasterOrder != nullptr) {
+        rasterOrder->rasterizationOrderDepthAttachmentAccess = VK_FALSE;
+        rasterOrder->rasterizationOrderStencilAttachmentAccess = VK_FALSE;
+    }
+
     if (isProtected) {
         if (!protectedMemoryFeatures->protectedMemory) {
             return false;
@@ -611,7 +633,7 @@ bool CreateVkBackendContext(PFN_vkGetInstanceProcAddr getInstProc,
         // If the instance version is 1.0 we must have the apiVersion also be 1.0. However, if the
         // instance version is 1.1 or higher, we can set the apiVersion to be whatever the highest
         // api we may use in skia (technically it can be arbitrary). So for now we set it to 1.1
-        // since that is the highest vulkan version.
+        // since that is the minimum requirement of Graphite.
         apiVersion = VK_MAKE_VERSION(1, 1, 0);
     }
 

@@ -24,7 +24,7 @@ var deps = deps_parser.DepsEntries{
 	},
 	"chromium.googlesource.com/angle/angle": {
 		Id:      "chromium.googlesource.com/angle/angle",
-		Version: "70b90f222c491cb9eb678e03f7a3fbf9f99932b5",
+		Version: "2a18fdbf4c8c20e37734611064d21a83658f6236",
 		Path:    "third_party/externals/angle2",
 	},
 	"chromium.googlesource.com/chromium/deps/icu": {
@@ -99,7 +99,7 @@ var deps = deps_parser.DepsEntries{
 	},
 	"chromium.googlesource.com/external/github.com/KhronosGroup/Vulkan-Utility-Libraries": {
 		Id:      "chromium.googlesource.com/external/github.com/KhronosGroup/Vulkan-Utility-Libraries",
-		Version: "ae56bd6e65d9faa731150e931cb35f0d895223bc",
+		Version: "49ac28931f28bffaa3cd73dc4ad997284d574962",
 		Path:    "third_party/externals/vulkan-utility-libraries",
 	},
 	"chromium.googlesource.com/external/github.com/google/highway": {
@@ -144,7 +144,7 @@ var deps = deps_parser.DepsEntries{
 	},
 	"chromium.googlesource.com/vulkan-deps": {
 		Id:      "chromium.googlesource.com/vulkan-deps",
-		Version: "a4af0bcda12773167c38b308b56eeadd53fdf546",
+		Version: "8888289eb6d9633f1ed1ec7c558da1d1de27fc70",
 		Path:    "third_party/externals/vulkan-deps",
 	},
 	"chromium.googlesource.com/webm/libwebp": {
@@ -154,7 +154,7 @@ var deps = deps_parser.DepsEntries{
 	},
 	"dawn.googlesource.com/dawn": {
 		Id:      "dawn.googlesource.com/dawn",
-		Version: "a3bfb33a777c75f77da36a7eb5ea4be24b86810f",
+		Version: "0dc9ec06d4415c3b6a1e812d6b008d6ee2b08109",
 		Path:    "third_party/externals/dawn",
 	},
 	"infra/3pp/tools/ninja": {
@@ -199,7 +199,7 @@ var deps = deps_parser.DepsEntries{
 	},
 	"skia.googlesource.com/external/github.com/KhronosGroup/SPIRV-Tools": {
 		Id:      "skia.googlesource.com/external/github.com/KhronosGroup/SPIRV-Tools",
-		Version: "01021466b5e71deaac9054f56082566c782bfd51",
+		Version: "da48bb20bdfc8a214d5bffdacca2d1d2ae849009",
 		Path:    "third_party/externals/spirv-tools",
 	},
 	"skia.googlesource.com/external/github.com/emscripten-core/emsdk": {
@@ -249,7 +249,7 @@ var deps = deps_parser.DepsEntries{
 	},
 	"swiftshader.googlesource.com/SwiftShader": {
 		Id:      "swiftshader.googlesource.com/SwiftShader",
-		Version: "f70c1194c1730893f7848cff07ca4ec196269709",
+		Version: "a8133cbb3c8969e3c1e6b3cea2c02ec8312ef9ca",
 		Path:    "third_party/externals/swiftshader",
 	},
 }

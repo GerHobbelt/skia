@@ -93,6 +93,10 @@ public:
     bool supportsYcbcrConversion() const { return fSupportsYcbcrConversion; }
     bool supportsDeviceFaultInfo() const { return fSupportsDeviceFaultInfo; }
 
+    // Whether a subpass self-dependency is required and a barrier to read from input attachments or
+    // not.
+    bool isInputAttachmentReadCoherent() const { return fIsInputAttachmentReadCoherent; }
+
     uint32_t maxVertexAttributes()   const { return fMaxVertexAttributes;   }
     uint64_t maxUniformBufferRange() const { return fMaxUniformBufferRange; }
     uint64_t maxStorageBufferRange() const { return fMaxStorageBufferRange; }
@@ -124,7 +128,17 @@ private:
               const skgpu::VulkanExtensions*,
               Protected);
 
-    void applyDriverCorrectnessWorkarounds(const VkPhysicalDeviceProperties&);
+    struct PhysicalDeviceProperties {
+        VkPhysicalDeviceProperties2 base;
+        VkPhysicalDeviceDriverProperties driver;
+    };
+    void getProperties(const skgpu::VulkanInterface* vkInterface,
+                       VkPhysicalDevice physDev,
+                       uint32_t physicalDeviceVersion,
+                       const skgpu::VulkanExtensions* extensions,
+                       PhysicalDeviceProperties* props);
+
+    void applyDriverCorrectnessWorkarounds(const PhysicalDeviceProperties&);
 
     void initFormatTable(const skgpu::VulkanInterface*,
                          VkPhysicalDevice,
@@ -249,6 +263,7 @@ private:
     bool fGpuOnlyBuffersMorePerformant = false;
     bool fShouldPersistentlyMapCpuToGpuBuffers = true;
     bool fSupportsDeviceFaultInfo = false;
+    bool fIsInputAttachmentReadCoherent = false;
 
     // Flags to enable workarounds for driver bugs
     bool fMustLoadFullImageForMSAA = false;
