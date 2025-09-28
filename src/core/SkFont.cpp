@@ -178,7 +178,7 @@ void SkFont::unicharsToGlyphs(SkSpan<const SkUnichar> unis, SkSpan<SkGlyphID> gl
     this->getTypeface()->unicharsToGlyphs(unis, glyphs);
 }
 
-int SkFont::textToGlyphs(const void* text, size_t byteLength, SkTextEncoding encoding,
+size_t SkFont::textToGlyphs(const void* text, size_t byteLength, SkTextEncoding encoding,
                          SkSpan<SkGlyphID> glyphs) const {
     return this->getTypeface()->textToGlyphs(text, byteLength, encoding, glyphs);
 }
@@ -187,24 +187,24 @@ SkScalar SkFont::measureText(const void* text, size_t length, SkTextEncoding enc
                              SkRect* bounds, const SkPaint* paint) const {
 
     SkAutoToGlyphs atg(*this, text, length, encoding);
-    const int glyphCount = atg.count();
-    if (glyphCount == 0) {
+    const SkSpan<const SkGlyphID> glyphIDs = atg.glyphs();
+
+    if (glyphIDs.size() == 0) {
         if (bounds) {
             bounds->setEmpty();
         }
         return 0;
     }
-    const SkGlyphID* glyphIDs = atg.glyphs();
 
     auto [strikeSpec, strikeToSourceScale] = SkStrikeSpec::MakeCanonicalized(*this, paint);
     SkBulkGlyphMetrics metrics{strikeSpec};
-    SkSpan<const SkGlyph*> glyphs = metrics.glyphs(SkSpan(glyphIDs, glyphCount));
+    SkSpan<const SkGlyph*> glyphs = metrics.glyphs(glyphIDs);
 
     SkScalar width = 0;
     if (bounds) {
         *bounds = glyphs[0]->rect();
         width = glyphs[0]->advanceX();
-        for (int i = 1; i < glyphCount; ++i) {
+        for (size_t i = 1; i < glyphIDs.size(); ++i) {
             SkRect r = glyphs[i]->rect();
             r.offset(width, 0);
             bounds->join(r);
@@ -229,6 +229,12 @@ SkScalar SkFont::measureText(const void* text, size_t length, SkTextEncoding enc
     return width;
 }
 
+static inline SkRect scale_pos(SkRect r, SkScalar s) {
+    SkASSERT(s >= 0);   // so we don't have to worry about swapping the rect to stay valid
+    return {
+        r.fLeft * s, r.fTop * s, r.fRight * s, r.fBottom * s,
+    };
+}
 void SkFont::getWidthsBounds(SkSpan<const SkGlyphID> glyphIDs,
                              SkSpan<SkScalar> widths,
                              SkSpan<SkRect> bounds,
@@ -238,10 +244,9 @@ void SkFont::getWidthsBounds(SkSpan<const SkGlyphID> glyphIDs,
     SkSpan<const SkGlyph*> glyphs = metrics.glyphs(glyphIDs);
 
     if (bounds.size()) {
-        const auto scaleMat = SkMatrix::Scale(strikeToSourceScale, strikeToSourceScale);
         const auto n = std::min(bounds.size(), glyphs.size());
         for (auto [bound, glyph] : SkMakeZip(bounds.first(n), glyphs.first(n))) {
-            scaleMat.mapRectScaleTranslate(&bound, glyph->rect());
+            bound = scale_pos(glyph->rect(), strikeToSourceScale);
         }
     }
 
@@ -375,7 +380,7 @@ SkScalar SkFontPriv::ApproximateTransformedTextSize(const SkFont& font, const Sk
     }
 }
 
-int SkFontPriv::CountTextElements(const void* text, size_t byteLength, SkTextEncoding encoding) {
+size_t SkFontPriv::CountTextElements(const void* text, size_t byteLength, SkTextEncoding encoding) {
     switch (encoding) {
         case SkTextEncoding::kUTF8:
             return SkUTF::CountUTF8(reinterpret_cast<const char*>(text), byteLength);

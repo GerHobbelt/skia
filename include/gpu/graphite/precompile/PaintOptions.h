@@ -27,6 +27,7 @@ class PrecompileShader;
 enum class Coverage;
 enum DrawTypeFlags : uint16_t;
 enum class PrecompileImageFilterFlags : uint32_t;
+enum class TextureFormat : uint8_t;
 
 class KeyContext;
 class PaintOptionsPriv;
@@ -168,10 +169,12 @@ private:
     int numCombinations() const;
     // 'desiredCombination' must be less than the result of the numCombinations call
     void createKey(const KeyContext&,
+                   TextureFormat,
                    PaintParamsKeyBuilder*,
                    PipelineDataGatherer*,
                    int desiredCombination,
                    bool addPrimitiveBlender,
+                   bool addAnalyticClip,
                    Coverage coverage) const;
 
     typedef std::function<void(UniquePaintParamsID id,
