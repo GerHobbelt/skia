@@ -1732,7 +1732,9 @@ void SkCanvas::drawRRect(const SkRRect& rrect, const SkPaint& paint) {
 
 void SkCanvas::drawPoints(PointMode mode, SkSpan<const SkPoint> pts, const SkPaint& paint) {
     TRACE_EVENT0("skia", TRACE_FUNC);
-    this->onDrawPoints(mode, pts.size(), pts.data(), paint);
+    if (!pts.empty()) {
+        this->onDrawPoints(mode, pts.size(), pts.data(), paint);
+    }
 }
 
 void SkCanvas::drawVertices(const sk_sp<SkVertices>& vertices, SkBlendMode mode,
@@ -1967,7 +1969,7 @@ void SkCanvas::onDrawPoints(PointMode mode, size_t count, const SkPoint pts[],
 
     auto layer = this->aboutToDraw(strokePaint, boundsPtr);
     if (layer) {
-        this->topDevice()->drawPoints(mode, count, pts, layer->paint());
+        this->topDevice()->drawPoints(mode, {pts, count}, layer->paint());
     }
 }
 
@@ -2487,7 +2489,7 @@ void SkCanvas::drawSimpleText(const void* text, size_t byteLength, SkTextEncodin
 void SkCanvas::drawGlyphs(SkSpan<const SkGlyphID> glyphs, SkSpan<const SkPoint> positions,
                           SkSpan<const uint32_t> clusters, SkSpan<const char> utf8text,
                           SkPoint origin, const SkFont& font, const SkPaint& paint) {
-    if (glyphs.size() == 0) { return; }
+    if (glyphs.empty()) { return; }
 
     sktext::GlyphRun glyphRun {
             font,
@@ -2505,7 +2507,7 @@ void SkCanvas::drawGlyphs(SkSpan<const SkGlyphID> glyphs, SkSpan<const SkPoint> 
 
 void SkCanvas::drawGlyphs(SkSpan<const SkGlyphID> glyphs, SkSpan<const SkPoint> positions,
                           SkPoint origin, const SkFont& font, const SkPaint& paint) {
-    if (glyphs.size() == 0) { return; }
+    if (glyphs.empty()) { return; }
 
     sktext::GlyphRun glyphRun {
         font,
@@ -2523,7 +2525,7 @@ void SkCanvas::drawGlyphs(SkSpan<const SkGlyphID> glyphs, SkSpan<const SkPoint> 
 
 void SkCanvas::drawGlyphsRSXform(SkSpan<const SkGlyphID> glyphs, SkSpan<const SkRSXform> xforms,
                                  SkPoint origin, const SkFont& font, const SkPaint& paint) {
-    if (glyphs.size() == 0) { return; }
+    if (glyphs.empty()) { return; }
 
     auto [positions, rotateScales] =
             fScratchGlyphRunBuilder->convertRSXForm(xforms);
