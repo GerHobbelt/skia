@@ -10,7 +10,6 @@
 #include "include/core/SkPath.h"
 #include "include/core/SkPathBuilder.h"
 #include "include/core/SkPathEffect.h"
-#include "include/core/SkPathTypes.h"
 #include "include/core/SkPathUtils.h"
 #include "include/core/SkPixmap.h"
 #include "include/core/SkPoint.h"
@@ -152,10 +151,7 @@ static void draw_rect_as_path(const SkDrawBase& orig,
                               const SkMatrix& ctm) {
     SkDrawBase draw(orig);
     draw.fCTM = &ctm;
-    SkPath  tmp;
-    tmp.addRect(prePaintRect);
-    tmp.setFillType(SkPathFillType::kWinding);
-    draw.drawPath(tmp, paint, nullptr, true);
+    draw.drawPath(SkPath::Rect(prePaintRect), paint, nullptr, true);
 }
 
 void SkDrawBase::drawRect(const SkRect& prePaintRect, const SkPaint& paint,
@@ -314,9 +310,7 @@ void SkDrawBase::drawRRect(const SkRRect& rrect, const SkPaint& paint) const {
 
 DRAW_PATH:
     // Now fall back to the default case of using a path.
-    SkPath path;
-    path.addRRect(rrect);
-    this->drawPath(path, paint, nullptr, true);
+    this->drawPath(SkPath::RRect(rrect), paint, nullptr, true);
 }
 
 bool SkDrawBase::drawRRectNinePatch(const SkRRect& rrect, const SkPaint& paint) const {
@@ -659,16 +653,14 @@ void SkDrawBase::drawDevicePoints(SkCanvas::PointMode mode, SkSpan<const SkPoint
                         device->drawOval(r, newPaint);
                     }
                 } else {
-                    SkPath     path;
+                    SkPath     path = SkPath::Circle(0, 0, radius);
                     SkMatrix   preMatrix;
 
-                    path.addCircle(0, 0, radius);
                     for (const auto& pt : points) {
                         preMatrix.setTranslate(pt.fX, pt.fY);
                         // pass true for the last point, since we can modify
                         // then path then
                         const bool isLast = &pt == &points.back();
-                        path.setIsVolatile(isLast);
                         this->drawPath(path, newPaint, &preMatrix, isLast);
                     }
                 }
@@ -771,20 +763,17 @@ void SkDrawBase::drawDevicePoints(SkCanvas::PointMode mode, SkSpan<const SkPoint
             [[fallthrough]]; // couldn't take fast path
         case SkCanvas::kPolygon_PointMode: {
             auto count = points.size() - 1;
-            SkPath path;
             SkPaint p(paint);
             p.setStyle(SkPaint::kStroke_Style);
             size_t inc = (SkCanvas::kLines_PointMode == mode) ? 2 : 1;
-            path.setIsVolatile(true);
+
             for (size_t i = 0; i < count; i += inc) {
-                path.moveTo(points[i]);
-                path.lineTo(points[i+1]);
+                auto path = SkPath::Line(points[i], points[i+1]);
                 if (device) {
                     device->drawPath(path, p, true);
                 } else {
                     this->drawPath(path, p, nullptr, true);
                 }
-                path.rewind();
             }
             break;
         }
