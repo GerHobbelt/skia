@@ -1155,9 +1155,7 @@ bool SkMatrix::mapRect(SkRect* dst, const SkRect& src, SkApplyPerspectiveClip pc
         *dst = builder.computeBounds();
         return false;
     } else {
-        SkPoint quad[4];
-
-        src.toQuad(quad);
+        std::array<SkPoint, 4> quad = src.toQuad();
         this->mapPoints(quad);
         dst->setBoundsNoCheck(quad);
         return this->rectStaysRect();   // might still return true if rotated by 90, etc.
@@ -1295,42 +1293,42 @@ bool SkMatrix::Poly4Proc(const SkPoint srcPt[], SkMatrix* dst) {
 
 typedef bool (*PolyMapProc)(const SkPoint[], SkMatrix*);
 
-/*  Adapted from Rob Johnson's original sample code in QuickDraw GX
+/*  Originally adapted from Rob Johnson's original sample code in QuickDraw GX
 */
-bool SkMatrix::setPolyToPoly(const SkPoint src[], const SkPoint dst[], int count) {
-    if ((unsigned)count > 4) {
-        SkDebugf("--- SkMatrix::setPolyToPoly count out of range %d\n", count);
-        return false;
-    }
-
-    if (0 == count) {
-        this->reset();
-        return true;
-    }
-    if (1 == count) {
-        this->setTranslate(dst[0].fX - src[0].fX, dst[0].fY - src[0].fY);
-        return true;
+std::optional<SkMatrix> SkMatrix::PolyToPoly(SkSpan<const SkPoint> src, SkSpan<const SkPoint> dst) {
+    if (src.size() != dst.size()) {
+        return {};
     }
 
     const PolyMapProc gPolyMapProcs[] = {
         SkMatrix::Poly2Proc, SkMatrix::Poly3Proc, SkMatrix::Poly4Proc
     };
-    PolyMapProc proc = gPolyMapProcs[count - 2];
 
-    SkMatrix tempMap;
+    switch (src.size()) {
+        case 0: return SkMatrix::I();
+        case 1: return SkMatrix::Translate(dst[0] - src[0]);
+        case 2: [[fallthrough]];
+        case 3: [[fallthrough]];
+        case 4: {
+            PolyMapProc proc = gPolyMapProcs[src.size() - 2];
 
-    if (!proc(src, &tempMap)) {
-        return false;
+            SkMatrix tempMap;
+            if (!proc(src.data(), &tempMap)) {
+                return {};
+            }
+            auto inverse = tempMap.invert();
+            if (!inverse) {
+                return {};
+            }
+            if (!proc(dst.data(), &tempMap)) {
+                return {};
+            }
+            return tempMap * inverse.value();
+        } break;
+        default:
+            break;
     }
-    auto result = tempMap.invert();
-    if (!result) {
-        return false;
-    }
-    if (!proc(dst, &tempMap)) {
-        return false;
-    }
-    this->setConcat(tempMap, *result);
-    return true;
+    return {};
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1744,10 +1742,8 @@ bool SkMatrixPriv::NearlyAffine(const SkMatrix& m,
     // that the transformation is nearly affine.
 
     // We can map the four points simultaneously.
-    SkPoint quad[4];
-    bounds.toQuad(quad);
     SkPoint3 xyw[4];
-    m.mapPointsToHomogeneous(xyw, quad);
+    m.mapPointsToHomogeneous(xyw, bounds.toQuad());
 
     // Since the Jacobian is a 3x3 matrix, the determinant is a scalar triple product,
     // and the initial cross product is constant across all four points.

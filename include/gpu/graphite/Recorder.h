@@ -271,6 +271,8 @@ private:
     void registerDevice(sk_sp<Device>);
     void deregisterDevice(const Device*);
 
+    SkCanvas* makeCaptureCanvas(SkCanvas*) override;
+
     sk_sp<SharedContext> fSharedContext;
     ResourceProvider* fResourceProvider; // May point to the Context's resource provider
     std::unique_ptr<ResourceProvider> fOwnedResourceProvider; // May be null
@@ -317,26 +319,6 @@ private:
     // For testing use only -- the Context used to create this Recorder
     Context* fContext = nullptr;
 #endif
-
-    // TODO(b/407062399): Tracking of resource use for pathologic scenarios in the wild
-    int fMaxRootTaskListSize = 0;
-    int fMaxRootUploadListSize = 0;
-    int fMaxTexturesPerRecording = 0;
-    int fMaxAliveRecordings = 0;
-    int fMaxCommandBufferResources = 0;
-    int fMaxRecordingsPerCommandBuffer = 0;
-    int fMaxVizRecordingsPerCommandBuffer = 0;
-    int fMaxMainRecordingsPerCommandBuffer = 0;
-    int fMaxAsyncReadRecordingsPerCommandBuffer = 0;
-
-    // Cloned from UploadBufferManager for storage
-    int fMaxReusedUploadBufferCount = 0;
-    int fMaxUsedUploadBufferCount = 0;
-
-    // Cloned from DrawBufferManager
-    int fMaxUsedDrawBufferCount = 0;
-    uint32_t fMaxUsedUniformBytes = 0;
-    uint32_t fMaxUsedVertexBytes = 0;
 };
 
 } // namespace skgpu::graphite
