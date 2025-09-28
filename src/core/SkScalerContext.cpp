@@ -297,11 +297,8 @@ SkGlyph SkScalerContext::internalMakeGlyph(SkPackedGlyphID packedID, SkMask::For
         // only want the bounds from the filter
         SkMask src(nullptr, glyph.iRect(), glyph.rowBytes(), glyph.maskFormat());
         SkMaskBuilder dst;
-        SkMatrix matrix;
 
-        fRec.getMatrixFrom2x2(&matrix);
-
-        if (as_MFB(fMaskFilter)->filterMask(&dst, src, matrix, nullptr)) {
+        if (as_MFB(fMaskFilter)->filterMask(&dst, src, fRec.getMatrixFrom2x2(), nullptr)) {
             if (dst.fBounds.isEmpty()) {
                 zeroBounds(glyph);
                 return glyph;
@@ -661,10 +658,9 @@ void SkScalerContext::getImage(const SkGlyph& origGlyph) {
 
         SkMaskBuilder srcMask;
         SkAutoMaskFreeImage srcMaskOwnedImage(nullptr);
-        SkMatrix m;
-        fRec.getMatrixFrom2x2(&m);
 
-        if (as_MFB(fMaskFilter)->filterMask(&srcMask, unfilteredGlyph->mask(), m, nullptr)) {
+        if (as_MFB(fMaskFilter)->filterMask(&srcMask, unfilteredGlyph->mask(),
+                                            fRec.getMatrixFrom2x2(), nullptr)) {
             // Filter succeeded; srcMask.fImage was allocated.
             srcMaskOwnedImage.reset(srcMask.image());
         } else if (unfilteredGlyph->fImage == tmpGlyphImageStorage.get()) {
@@ -783,8 +779,6 @@ void SkScalerContext::internalGetPath(SkGlyph& glyph, SkArenaAlloc* alloc,
         return;
     }
 
-    SkPackedGlyphID glyphID = glyph.getPackedID();
-
     if (!generatedPath) {
         generatedPath = this->generatePath(glyph);
     }
@@ -792,10 +786,12 @@ void SkScalerContext::internalGetPath(SkGlyph& glyph, SkArenaAlloc* alloc,
         glyph.setPath(alloc, (SkPath*)nullptr, false, false);
         return;
     }
+
     SkPath path = std::move(generatedPath->path);
     bool pathModified = std::move(generatedPath->modified);
 
     if (fRec.fFlags & SkScalerContext::kSubpixelPositioning_Flag) {
+        SkPackedGlyphID glyphID = glyph.getPackedID();
         SkFixed dx = glyphID.getSubXFixed();
         SkFixed dy = glyphID.getSubYFixed();
         if (dx | dy) {
@@ -806,81 +802,77 @@ void SkScalerContext::internalGetPath(SkGlyph& glyph, SkArenaAlloc* alloc,
 
     if (fRec.fFrameWidth < 0 && fPathEffect == nullptr) {
         glyph.setPath(alloc, &path, false, pathModified);
-    } else {
-        pathModified = true; // It could still end up the same, but it's probably going to change.
-
-        // need the path in user-space, with only the point-size applied
-        // so that our stroking and effects will operate the same way they
-        // would if the user had extracted the path themself, and then
-        // called drawPath
-        SkMatrix matrix;
-        SkMatrix inverse;
-
-        fRec.getMatrixFrom2x2(&matrix);
-        if (!matrix.invert(&inverse)) {
-            SkPath empty;
-            glyph.setPath(alloc, &empty, false, pathModified);
-        }
-        auto localPath = path.makeTransform(inverse);
-        // now localPath is only affected by the paint settings, and not the canvas matrix
-
-        SkStrokeRec rec(SkStrokeRec::kFill_InitStyle);
-
-        if (fRec.fFrameWidth >= 0) {
-            rec.setStrokeStyle(fRec.fFrameWidth,
-                               SkToBool(fRec.fFlags & kFrameAndFill_Flag));
-            // glyphs are always closed contours, so cap type is ignored,
-            // so we just pass something.
-            rec.setStrokeParams((SkPaint::Cap)fRec.fStrokeCap,
-                                (SkPaint::Join)fRec.fStrokeJoin,
-                                fRec.fMiterLimit);
-        }
-
-        if (fPathEffect) {
-            SkPathBuilder builder;
-            if (fPathEffect->filterPath(&builder, localPath, &rec, nullptr, matrix)) {
-                localPath = builder.detach();
-            }
-        }
-
-        if (rec.needToApply()) {
-            SkPathBuilder builder;
-            if (rec.applyToPath(&builder, localPath)) {
-                localPath = builder.detach();
-            }
-        }
-
-        auto devPath = localPath.makeTransform(matrix);
-        glyph.setPath(alloc, &devPath, rec.isHairlineStyle(), pathModified);
+        return;
     }
+
+    pathModified = true; // It could still end up the same, but it's probably going to change.
+
+    // need the path in user-space, with only the point-size applied
+    // so that our stroking and effects will operate the same way they
+    // would if the user had extracted the path themself, and then
+    // called drawPath
+    SkMatrix matrix = fRec.getMatrixFrom2x2();
+
+    // We apply the inverse, so that localPath is only affected by the paint settings
+    // and not the canvas matrix.
+    auto inverse = matrix.invert();
+    if (!inverse) {
+        SkPath empty;
+        glyph.setPath(alloc, &empty, false, pathModified);
+        return;
+    }
+    auto localPath = path.makeTransform(*inverse);
+
+    SkStrokeRec rec(SkStrokeRec::kFill_InitStyle);
+
+    if (fRec.fFrameWidth >= 0) {
+        rec.setStrokeStyle(fRec.fFrameWidth,
+                           SkToBool(fRec.fFlags & kFrameAndFill_Flag));
+        // glyphs are always closed contours, so cap type is ignored,
+        // so we just pass something.
+        rec.setStrokeParams((SkPaint::Cap)fRec.fStrokeCap,
+                            (SkPaint::Join)fRec.fStrokeJoin,
+                            fRec.fMiterLimit);
+    }
+
+    if (fPathEffect) {
+        SkPathBuilder builder;
+        if (fPathEffect->filterPath(&builder, localPath, &rec, nullptr, matrix)) {
+            localPath = builder.detach();
+        }
+    }
+
+    if (rec.needToApply()) {
+        SkPathBuilder builder;
+        if (rec.applyToPath(&builder, localPath)) {
+            localPath = builder.detach();
+        }
+    }
+
+    auto devPath = localPath.makeTransform(matrix);
+    glyph.setPath(alloc, &devPath, rec.isHairlineStyle(), pathModified);
 }
 
 
-void SkScalerContextRec::getMatrixFrom2x2(SkMatrix* dst) const {
-    dst->setAll(fPost2x2[0][0], fPost2x2[0][1], 0,
-                fPost2x2[1][0], fPost2x2[1][1], 0,
-                0,              0,              1);
+SkMatrix SkScalerContextRec::getMatrixFrom2x2() const {
+    return SkMatrix::MakeAll(fPost2x2[0][0], fPost2x2[0][1], 0,
+                             fPost2x2[1][0], fPost2x2[1][1], 0,
+                             0,              0,              1);
 }
 
-void SkScalerContextRec::getLocalMatrix(SkMatrix* m) const {
-    *m = SkFontPriv::MakeTextMatrix(fTextSize, fPreScaleX, fPreSkewX);
+SkMatrix SkScalerContextRec::getLocalMatrix() const {
+    return SkFontPriv::MakeTextMatrix(fTextSize, fPreScaleX, fPreSkewX);
 }
 
-void SkScalerContextRec::getSingleMatrix(SkMatrix* m) const {
-    this->getLocalMatrix(m);
-
-    //  now concat the device matrix
-    SkMatrix    deviceMatrix;
-    this->getMatrixFrom2x2(&deviceMatrix);
-    m->postConcat(deviceMatrix);
+SkMatrix SkScalerContextRec::getSingleMatrix() const {
+    return this->getLocalMatrix().postConcat(this->getMatrixFrom2x2());
 }
 
 bool SkScalerContextRec::computeMatrices(PreMatrixScale preMatrixScale, SkVector* s, SkMatrix* sA,
                                          SkMatrix* GsA, SkMatrix* G_inv, SkMatrix* A_out) const
 {
     // A is the 'total' matrix.
-    SkMatrix A;
-    this->getSingleMatrix(&A);
+    const SkMatrix A = this->getSingleMatrix();
 
     // The caller may find the 'total' matrix useful when dealing directly with EM sizes.
     if (A_out) {
