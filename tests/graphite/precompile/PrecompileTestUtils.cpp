@@ -44,6 +44,37 @@ using ::skgpu::graphite::RenderPassProperties;
 
 namespace PrecompileTestUtils {
 
+PaintOptions ImagePremulHWOnlyPlusColorSrcover() {
+    PaintOptions paintOptions;
+
+    SkColorInfo ci { kRGBA_8888_SkColorType, kPremul_SkAlphaType, nullptr };
+    sk_sp<PrecompileShader> img = PrecompileShaders::Image(ImageShaderFlags::kExcludeCubic,
+                                                           { &ci, 1 },
+                                                           {});
+    SkBlendMode kBlendModes = SkBlendMode::kPlus;
+    paintOptions.setShaders({ PrecompileShaders::Blend({ &kBlendModes, 1 },
+                                                       { std::move(img) },
+                                                       { PrecompileShaders::Color() }) });
+    paintOptions.setBlendModes({ SkBlendMode::kSrcOver });
+    return paintOptions;
+}
+
+PaintOptions TransparentPaintImagePremulHWOnlyPlusColorSrcover() {
+    PaintOptions paintOptions;
+
+    SkColorInfo ci { kRGBA_8888_SkColorType, kPremul_SkAlphaType, nullptr };
+    sk_sp<PrecompileShader> img = PrecompileShaders::Image(ImageShaderFlags::kExcludeCubic,
+                                                           { &ci, 1 },
+                                                           {});
+    SkBlendMode kBlendModes = SkBlendMode::kPlus;
+    paintOptions.setShaders({ PrecompileShaders::Blend({ &kBlendModes, 1 },
+                                                       { std::move(img) },
+                                                       { PrecompileShaders::Color() }) });
+    paintOptions.setBlendModes({ SkBlendMode::kSrcOver });
+    paintOptions.setPaintColorIsOpaque(false);
+    return paintOptions;
+}
+
 PaintOptions SolidSrcover() {
     PaintOptions paintOptions;
     paintOptions.setBlendModes({ SkBlendMode::kSrcOver });
@@ -522,8 +553,27 @@ const MouriMap& MouriMap() {
 
 } // anonymous namespace
 
-skgpu::graphite::PaintOptions MouriMapCrosstalkAndChunk16x16() {
+skgpu::graphite::PaintOptions MouriMapCrosstalkAndChunk16x16Passthrough() {
     SkColorInfo ci { kRGBA_8888_SkColorType, kPremul_SkAlphaType, nullptr };
+    sk_sp<PrecompileShader> img = PrecompileShaders::Image(ImageShaderFlags::kExcludeCubic,
+                                                           { &ci, 1 },
+                                                           {});
+
+    sk_sp<PrecompileShader> crosstalk = PrecompileRuntimeEffects::MakePrecompileShader(
+            MouriMap().crosstalkAndChunk16x16Effect(),
+            { { std::move(img) } });
+
+    PaintOptions paintOptions;
+    paintOptions.setShaders({ std::move(crosstalk) });
+    paintOptions.setBlendModes({ SkBlendMode::kSrc });
+    return paintOptions;
+}
+
+skgpu::graphite::PaintOptions MouriMapCrosstalkAndChunk16x16Premul() {
+    // This usage of kUnpremul is non-obvious. It acts to short circuit the identity-colorspace
+    // optimization for runtime effects. In this case, the Pipeline requires a
+    // ColorSpaceTransformPremul instead of the (optimized) Passthrough.
+    SkColorInfo ci { kRGBA_8888_SkColorType, kUnpremul_SkAlphaType, nullptr };
     sk_sp<PrecompileShader> img = PrecompileShaders::Image(ImageShaderFlags::kExcludeCubic,
                                                            { &ci, 1 },
                                                            {});
@@ -1071,7 +1121,12 @@ int PipelineLabelInfoCollector::processLabel(const std::string& precompiledLabel
 
     auto result = fMap.find(precompiledLabel.c_str());
     if (result == fMap.end()) {
-        SkASSERT(fOverGenerated.find(precompiledLabel) == fOverGenerated.end());
+        SkDEBUGCODE(auto prior = fOverGenerated.find(precompiledLabel);)
+        SkASSERTF(prior == fOverGenerated.end(),
+                  "duplicate (unused) Pipeline found for cases %d %d:\n%s\n",
+                  prior->second.fOriginatingSetting,
+                  precompileCase,
+                  precompiledLabel.c_str());
         fOverGenerated.insert({ precompiledLabel, OverGenInfo(precompileCase) });
         return -1;
     }
@@ -1213,8 +1268,10 @@ void RunTest(skgpu::graphite::PrecompileContext* precompileContext,
     // This block will print out all the cases in 'kCases' that the given PrecompileSettings
     // covered.
     sort(matchesInCases.begin(), matchesInCases.end());
-    SkDebugf("precompile case %d handles %zu/%zu cases (%.2f utilization): ",
-             precompileSettingsIndex, matchesInCases.size(), generatedLabels.size(), utilization);
+    SkDebugf("// %d: %d%% (%zu/%zu) handles: ",
+             precompileSettingsIndex,
+             SkScalarRoundToInt(utilization * 100),
+             matchesInCases.size(), generatedLabels.size());
     for (size_t h : matchesInCases) {
         SkDebugf("%zu ", h);
     }

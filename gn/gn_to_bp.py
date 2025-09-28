@@ -652,12 +652,12 @@ nanobench_includes = strip_slashes(nanobench_target['include_dirs'])
 skcms_srcs = strip_slashes(js['targets']['//modules/skcms:skcms']['sources'])
 
 
-gn_to_bp_utils.GrabDependentValues(js, '//:gm', 'sources', gm_srcs, '//:skia')
-gn_to_bp_utils.GrabDependentValues(js, '//:tests', 'sources', test_srcs, '//:skia')
+gn_to_bp_utils.GrabDependentValues(js, '//:gm', 'sources', gm_srcs, ['//:skia', '//:pathops'])
+gn_to_bp_utils.GrabDependentValues(js, '//:tests', 'sources', test_srcs, ['//:skia', '//:pathops'])
 gn_to_bp_utils.GrabDependentValues(js, '//:dm', 'sources',
-                                   dm_srcs, ['//:skia', '//:gm', '//:tests'])
+                                   dm_srcs, ['//:skia', '//:gm', '//:tests', '//:pathops'])
 gn_to_bp_utils.GrabDependentValues(js, '//:nanobench', 'sources',
-                                   nanobench_srcs, ['//:skia', '//:gm'])
+                                   nanobench_srcs, ['//:skia', '//:gm', '//:pathops'])
 
 # skcms is a little special, kind of a second-party library.
 local_includes.add("modules/skcms")
