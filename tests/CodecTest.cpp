@@ -1120,7 +1120,7 @@ DEF_TEST(Codec_wbmp_restrictive, r) {
     }
 
     // Modify the stream to contain a second byte with some bits set.
-    auto data = SkCopyStreamToData(stream.get());
+    auto data = SkStreamPriv::CopyStreamToData(stream.get());
     uint8_t* writeableData = static_cast<uint8_t*>(data->writable_data());
     writeableData[1] = static_cast<uint8_t>(~0x9F);
 
@@ -2177,7 +2177,7 @@ DEF_TEST(Codec_gif_can_preserve_original_data, r) {
 
     // The whole point of DeferredFromCodec is that it allows the client
     // to hold onto the original image data for later.
-    sk_sp<SkData> encodedData = image->refEncodedData();
+    auto encodedData = image->refEncodedData();
     REPORTER_ASSERT(r, encodedData != nullptr);
     // The returned data should the same as what went in.
     REPORTER_ASSERT(r, encodedData->size() == data->size());
@@ -2210,7 +2210,7 @@ DEF_TEST(Codec_jpeg_can_return_data_from_original_stream, r) {
 
     // The whole point of DeferredFromCodec is that it allows the client
     // to hold onto the original image data for later.
-    sk_sp<SkData> encodedData = image->refEncodedData();
+    auto encodedData = image->refEncodedData();
     REPORTER_ASSERT(r, encodedData != nullptr);
     // The returned data should the same as what went in.
     REPORTER_ASSERT(r, encodedData->size() == expectedBytes);
