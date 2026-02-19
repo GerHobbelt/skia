@@ -8,10 +8,8 @@
 #ifndef SkLog_DEFINED
 #define SkLog_DEFINED
 
+#include "include/private/base/SkLoadUserConfig.h"
 #include "include/private/base/SkLogPriority.h"
-
-// Ensure SkUserConfig.h is loaded, as clients may define SKIA_LOWEST_ACTIVE_LOG_PRIORITY
-#include "include/core/SkTypes.h" // IWYU pragma: keep
 
 /**
  * TODO (b/469441457): SKGPU_GRAPHITE_LOWEST_ACTIVE_LOG_PRIORITY Was the config used to set the log
