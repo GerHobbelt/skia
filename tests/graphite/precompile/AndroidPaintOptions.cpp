@@ -43,27 +43,35 @@ static constexpr DrawTypeFlags operator|(DrawTypeFlags a, DrawTypeFlags b) {
 #if defined(SK_VULKAN)
 namespace {
 
-sk_sp<PrecompileShader> vulkan_ycbcr_image_shader(uint64_t format,
-                                                  VkSamplerYcbcrModelConversion model,
-                                                  VkSamplerYcbcrRange range,
-                                                  VkChromaLocation location,
-                                                  bool pqCS = false) {
-    SkColorInfo ci { kRGBA_8888_SkColorType,
-                     kPremul_SkAlphaType,
-                     pqCS ? SkColorSpace::MakeRGB(SkNamedTransferFn::kPQ,
-                                                  SkNamedGamut::kRec2020)
-                          : nullptr };
 
-    VkComponentMapping components = {VK_COMPONENT_SWIZZLE_IDENTITY,
-                                     VK_COMPONENT_SWIZZLE_IDENTITY,
-                                     VK_COMPONENT_SWIZZLE_IDENTITY,
-                                     VK_COMPONENT_SWIZZLE_IDENTITY};
+skgpu::VulkanYcbcrConversionInfo ycbcr_info(uint64_t externalFormat,
+                                            VkSamplerYcbcrModelConversion model,
+                                            VkSamplerYcbcrRange range,
+                                            VkChromaLocation location,
+                                            VkFilter filter = VK_FILTER_LINEAR,
+                                            bool samplerFilterMustMatchChromaFilter = true,
+                                            bool supportsLinearFilter = false) {
+    VkComponentMapping components = { VK_COMPONENT_SWIZZLE_IDENTITY,
+                                      VK_COMPONENT_SWIZZLE_IDENTITY,
+                                      VK_COMPONENT_SWIZZLE_IDENTITY,
+                                      VK_COMPONENT_SWIZZLE_IDENTITY };
 
-    skgpu::VulkanYcbcrConversionInfo info(format, model, range, location, location,
-                                          VK_FILTER_LINEAR, /*forceExplicitReconstruction=*/false,
-                                          components, /*formatFeatures=*/0);
+    VkFormatFeatureFlags formatFeatures = 0;
+    if (!samplerFilterMustMatchChromaFilter) {
+        formatFeatures |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_YCBCR_CONVERSION_SEPARATE_RECONSTRUCTION_FILTER_BIT;
+    }
+    if (supportsLinearFilter) {
+        formatFeatures |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+    }
 
-    return PrecompileShaders::VulkanYCbCrImage(info,
+    return skgpu::VulkanYcbcrConversionInfo(externalFormat, model, range, location, location,
+                                            filter, /*forceExplicitReconstruction=*/false,
+                                            components, formatFeatures);
+}
+
+sk_sp<PrecompileShader> vulkan_ycbcr_image_shader(const skgpu::VulkanYcbcrConversionInfo& ycbcrInfo,
+                                                  const SkColorInfo& ci) {
+    return PrecompileShaders::VulkanYCbCrImage(ycbcrInfo,
                                                PrecompileShaders::ImageShaderFlags::kExcludeCubic,
                                                { &ci, 1 },
                                                {});
@@ -72,59 +80,32 @@ sk_sp<PrecompileShader> vulkan_ycbcr_image_shader(uint64_t format,
 } // anonymous namespace
 #endif // SK_VULKAN
 
-// Specifies the child shader to be created for a LinearEffect
-enum class ChildType {
-    kSolidColor,
-    kHWTexture,
-#if defined(SK_VULKAN)
-    kHWTextureYCbCr247,
-#endif
-};
-
 namespace {
 
-sk_sp<PrecompileShader> create_child_shader(ChildType childType) {
-    switch (childType) {
-        case ChildType::kSolidColor:
-            return PrecompileShaders::Color();
-        case ChildType::kHWTexture: {
-            SkColorInfo ci { kRGBA_8888_SkColorType,
-                             kPremul_SkAlphaType,
-                             SkColorSpace::MakeRGB(SkNamedTransferFn::kSRGB,
-                                                   SkNamedGamut::kAdobeRGB) };
+sk_sp<PrecompileShader> create_hw_image_precompile_shader() {
+    SkColorInfo ci { kRGBA_8888_SkColorType,
+                     kPremul_SkAlphaType,
+                     SkColorSpace::MakeRGB(SkNamedTransferFn::kSRGB,
+                                           SkNamedGamut::kAdobeRGB) };
 
-            return PrecompileShaders::Image(PrecompileShaders::ImageShaderFlags::kExcludeCubic,
-                                            { &ci, 1 },
-                                            {});
-        }
-#if defined(SK_VULKAN)
-        case ChildType::kHWTextureYCbCr247:
-            // HardwareImage(3: kEwAAPcAAAAAAAAA)
-            return vulkan_ycbcr_image_shader(247,
-                                             VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_2020,
-                                             VK_SAMPLER_YCBCR_RANGE_ITU_NARROW,
-                                             VK_CHROMA_LOCATION_COSITED_EVEN,
-                                             /* pqCS= */ true);
-#endif
-    }
-
-    return nullptr;
+    return PrecompileShaders::Image(PrecompileShaders::ImageShaderFlags::kExcludeCubic,
+                                    { &ci, 1 },
+                                    {});
 }
 
 } // anonymous namespace
 
 skgpu::graphite::PaintOptions LinearEffect(sk_sp<SkRuntimeEffect> linearEffect,
-                                           ChildType childType,
+                                           sk_sp<PrecompileShader> childShader,
                                            SkBlendMode blendMode,
                                            bool paintColorIsOpaque = true,
                                            bool matrixColorFilter = false,
                                            bool dither = false) {
     PaintOptions paintOptions;
-    sk_sp<PrecompileShader> child = create_child_shader(childType);
-    paintOptions.setShaders({{ PrecompileRuntimeEffects::MakePrecompileShader(
-                                            std::move(linearEffect),
-                                            {{ {{ std::move(child) }} }})
-                            }});
+    sk_sp<PrecompileShader> linearEffectShader = PrecompileRuntimeEffects::MakePrecompileShader(
+        std::move(linearEffect),
+        {{ {{ std::move(childShader) }} }});
+    paintOptions.setShaders({{ std::move(linearEffectShader) }});
     if (matrixColorFilter) {
         paintOptions.setColorFilters(SKSPAN_INIT_ONE( PrecompileColorFilters::Matrix() ));
     }
@@ -243,45 +224,6 @@ skgpu::graphite::PaintOptions MouriMapToneMap(RuntimeEffectManager& effectManage
     return paintOptions;
 }
 
-
-skgpu::graphite::PaintOptions KawaseBlurLowSrcSrcOver(RuntimeEffectManager& effectManager) {
-    sk_sp<SkRuntimeEffect> lowSampleBlurEffect = effectManager.getKnownRuntimeEffect(
-            RuntimeEffectManager::KnownId::kKawaseBlurDualFilter_LowSampleBlurEffect);
-
-    SkColorInfo ci { kRGBA_8888_SkColorType, kPremul_SkAlphaType, nullptr };
-    sk_sp<PrecompileShader> img = PrecompileShaders::Image(ImageShaderFlags::kExcludeCubic,
-                                                           { &ci, 1 },
-                                                           {});
-
-    sk_sp<PrecompileShader> kawase = PrecompileRuntimeEffects::MakePrecompileShader(
-            std::move(lowSampleBlurEffect),
-            {{ {{ img }} }});
-
-    PaintOptions paintOptions;
-    paintOptions.setShaders({{ std::move(kawase) }});
-    paintOptions.setBlendModes({{ SkBlendMode::kSrc, SkBlendMode::kSrcOver }});
-    return paintOptions;
-}
-
-skgpu::graphite::PaintOptions KawaseBlurHighSrc(RuntimeEffectManager& effectManager) {
-    sk_sp<SkRuntimeEffect> highSampleBlurEffect = effectManager.getKnownRuntimeEffect(
-            RuntimeEffectManager::KnownId::kKawaseBlurDualFilter_HighSampleBlurEffect);
-
-    SkColorInfo ci { kRGBA_8888_SkColorType, kPremul_SkAlphaType, nullptr };
-    sk_sp<PrecompileShader> img = PrecompileShaders::Image(ImageShaderFlags::kExcludeCubic,
-                                                           { &ci, 1 },
-                                                           {});
-
-    sk_sp<PrecompileShader> kawase = PrecompileRuntimeEffects::MakePrecompileShader(
-            std::move(highSampleBlurEffect),
-            {{ {{ img }} }});
-
-    PaintOptions paintOptions;
-    paintOptions.setShaders({{ std::move(kawase) }});
-    paintOptions.setBlendModes(SKSPAN_INIT_ONE( SkBlendMode::kSrc ));
-    return paintOptions;
-}
-
 skgpu::graphite::PaintOptions BlurFilterMix(RuntimeEffectManager& effectManager) {
     sk_sp<SkRuntimeEffect> mixEffect = effectManager.getKnownRuntimeEffect(
             RuntimeEffectManager::KnownId::kBlurFilter_MixEffect);
@@ -307,11 +249,15 @@ PaintOptions ImagePremulYCbCr238Srcover(bool narrow) {
     PaintOptions paintOptions;
 
     // HardwareImage(3: kHoAAO4AAAAAAAAA)
-    paintOptions.setShaders({{ vulkan_ycbcr_image_shader(238,
-                                                        VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_709,
-                                                        narrow ? VK_SAMPLER_YCBCR_RANGE_ITU_NARROW
-                                                               : VK_SAMPLER_YCBCR_RANGE_ITU_FULL,
-                                                        VK_CHROMA_LOCATION_MIDPOINT) }});
+    const skgpu::VulkanYcbcrConversionInfo ycbcrInfo = ycbcr_info(
+        238,
+        VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_709,
+        narrow ? VK_SAMPLER_YCBCR_RANGE_ITU_NARROW
+               : VK_SAMPLER_YCBCR_RANGE_ITU_FULL,
+        VK_CHROMA_LOCATION_MIDPOINT);
+    const SkColorInfo kRGBA8Premul(kRGBA_8888_SkColorType, kPremul_SkAlphaType, nullptr);
+
+    paintOptions.setShaders({{ vulkan_ycbcr_image_shader(ycbcrInfo, kRGBA8Premul) }});
     paintOptions.setBlendModes(SKSPAN_INIT_ONE( SkBlendMode::kSrcOver ));
     return paintOptions;
 }
@@ -320,10 +266,14 @@ PaintOptions TransparentPaintImagePremulYCbCr238Srcover() {
     PaintOptions paintOptions;
 
     // HardwareImage(3: kHoAAO4AAAAAAAAA)
-    paintOptions.setShaders({{ vulkan_ycbcr_image_shader(238,
-                                                        VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_709,
-                                                        VK_SAMPLER_YCBCR_RANGE_ITU_NARROW,
-                                                        VK_CHROMA_LOCATION_MIDPOINT) }});
+    const skgpu::VulkanYcbcrConversionInfo ycbcrInfo = ycbcr_info(
+        238,
+        VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_709,
+        VK_SAMPLER_YCBCR_RANGE_ITU_NARROW,
+        VK_CHROMA_LOCATION_MIDPOINT);
+    const SkColorInfo kRGBA8Premul(kRGBA_8888_SkColorType, kPremul_SkAlphaType, nullptr);
+
+    paintOptions.setShaders({{ vulkan_ycbcr_image_shader(ycbcrInfo, kRGBA8Premul) }});
     paintOptions.setBlendModes(SKSPAN_INIT_ONE( SkBlendMode::kSrcOver ));
     paintOptions.setPaintColorIsOpaque(false);
     return paintOptions;
@@ -333,10 +283,14 @@ PaintOptions ImagePremulYCbCr240Srcover() {
     PaintOptions paintOptions;
 
     // HardwareImage(3: kHIAAPAAAAAAAAAA)
-    paintOptions.setShaders({{ vulkan_ycbcr_image_shader(240,
-                                                        VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_709,
-                                                        VK_SAMPLER_YCBCR_RANGE_ITU_FULL,
-                                                        VK_CHROMA_LOCATION_MIDPOINT) }});
+    const skgpu::VulkanYcbcrConversionInfo ycbcrInfo = ycbcr_info(
+        240,
+        VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_709,
+        VK_SAMPLER_YCBCR_RANGE_ITU_FULL,
+        VK_CHROMA_LOCATION_MIDPOINT);
+    const SkColorInfo kRGBA8Premul(kRGBA_8888_SkColorType, kPremul_SkAlphaType, nullptr);
+
+    paintOptions.setShaders({{ vulkan_ycbcr_image_shader(ycbcrInfo, kRGBA8Premul) }});
     paintOptions.setBlendModes(SKSPAN_INIT_ONE( SkBlendMode::kSrcOver ));
     return paintOptions;
 }
@@ -345,10 +299,14 @@ PaintOptions TransparentPaintImagePremulYCbCr240Srcover() {
     PaintOptions paintOptions;
 
     // HardwareImage(3: kHIAAPAAAAAAAAAA)
-    paintOptions.setShaders({{ vulkan_ycbcr_image_shader(240,
-                                                        VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_709,
-                                                        VK_SAMPLER_YCBCR_RANGE_ITU_FULL,
-                                                        VK_CHROMA_LOCATION_MIDPOINT) }});
+    const skgpu::VulkanYcbcrConversionInfo ycbcrInfo = ycbcr_info(
+        240,
+        VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_709,
+        VK_SAMPLER_YCBCR_RANGE_ITU_FULL,
+        VK_CHROMA_LOCATION_MIDPOINT);
+    const SkColorInfo kRGBA8Premul(kRGBA_8888_SkColorType, kPremul_SkAlphaType, nullptr);
+
+    paintOptions.setShaders({{ vulkan_ycbcr_image_shader(ycbcrInfo, kRGBA8Premul) }});
     paintOptions.setBlendModes(SKSPAN_INIT_ONE( SkBlendMode::kSrcOver ));
     paintOptions.setPaintColorIsOpaque(false);
     return paintOptions;
@@ -359,12 +317,17 @@ skgpu::graphite::PaintOptions MouriMapCrosstalkAndChunk16x16YCbCr247(
     PaintOptions paintOptions;
 
     // HardwareImage(3: kEwAAPcAAAAAAAAA)
-    sk_sp<PrecompileShader> img = vulkan_ycbcr_image_shader(
-            247,
-            VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_2020,
-            VK_SAMPLER_YCBCR_RANGE_ITU_NARROW,
-            VK_CHROMA_LOCATION_COSITED_EVEN,
-            /*pqCS=*/true);
+    const skgpu::VulkanYcbcrConversionInfo ycbcrInfo = ycbcr_info(
+        247,
+        VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_2020,
+        VK_SAMPLER_YCBCR_RANGE_ITU_NARROW,
+        VK_CHROMA_LOCATION_COSITED_EVEN);
+    const SkColorInfo kRGBA8PremulPQ(kRGBA_8888_SkColorType,
+                                     kPremul_SkAlphaType,
+                                     SkColorSpace::MakeRGB(SkNamedTransferFn::kPQ,
+                                                           SkNamedGamut::kRec2020));
+
+    sk_sp<PrecompileShader> img = vulkan_ycbcr_image_shader(ycbcrInfo, kRGBA8PremulPQ);
 
     sk_sp<PrecompileShader> crosstalk = PrecompileRuntimeEffects::MakePrecompileShader(
             effectManager.getKnownRuntimeEffect(
@@ -632,6 +595,13 @@ void VisitAndroidPrecompileSettings_Old(
                     /* type= */ shaders::LinearEffect::SkSLType::Shader,
             });
 
+#if defined(SK_VULKAN) && defined(SK_BUILD_FOR_ANDROID)
+    const SkColorInfo kRGBA8PremulPQ(kRGBA_8888_SkColorType,
+                                     kPremul_SkAlphaType,
+                                     SkColorSpace::MakeRGB(SkNamedTransferFn::kPQ,
+                                                           SkNamedGamut::kRec2020));
+#endif
+
     // clang-format on
 
     // =======================================
@@ -796,16 +766,6 @@ void VisitAndroidPrecompileSettings_Old(
           DrawTypeFlags::kNonAAFillRect,
           kRGBA16F_1_D_Linear },
 
-        // 100% (2/2) handles 52 53
-        { KawaseBlurLowSrcSrcOver(effectManager),
-          DrawTypeFlags::kNonAAFillRect,
-          kRGBA_1_D },
-
-        // 100% (1/1) handles 51
-        { KawaseBlurHighSrc(effectManager),
-          DrawTypeFlags::kNonAAFillRect,
-          kRGBA_1_D },
-
         // 100% (2/2) handles 49 99
         { BlurFilterMix(effectManager),
           kRRectAndNonAARect,
@@ -815,35 +775,35 @@ void VisitAndroidPrecompileSettings_Old(
 
         // 30: 100% (1/1) handles 4
         { LinearEffect(kUNKNOWN__SRGB__false__UNKNOWN__Shader,
-                       ChildType::kSolidColor,
+                       PrecompileShaders::Color(),
                        SkBlendMode::kSrcOver),
           DrawTypeFlags::kNonAAFillRect,
           kRGBA16F_1_D_SRGB },
 
         // 100% (1/1) handles 54
         { LinearEffect(kBT2020_ITU_PQ__BT2020__false__UNKNOWN__Shader,
-                       ChildType::kSolidColor,
+                       PrecompileShaders::Color(),
                        SkBlendMode::kSrc),
           DrawTypeFlags::kNonAAFillRect,
           kRGBA_1_D_SRGB },
 
         // 100% (2/2) handles 2 141
         { LinearEffect(kUNKNOWN__SRGB__false__UNKNOWN__Shader,
-                       ChildType::kHWTexture,
+                       create_hw_image_precompile_shader(),
                        SkBlendMode::kSrcOver),
           DrawTypeFlags::kNonAAFillRect,
           kCombo_RGBA_1D_SRGB_w16F },
 
         // 67% (2/3) handles 26 64 - due to the w/o msaa load variants not being used
         { LinearEffect(k0x188a0000__DISPLAY_P3__false__0x90a0000__Shader,
-                       ChildType::kHWTexture,
+                       create_hw_image_precompile_shader(),
                        SkBlendMode::kSrcOver),
           DrawTypeFlags::kAnalyticRRect,
           kCombo_RGBA_1D_4DS_SRGB },
 
         // 100% (2/2) handles 139 140
         { LinearEffect(k0x188a0000__DISPLAY_P3__false__0x90a0000__Shader,
-                       ChildType::kHWTexture,
+                       create_hw_image_precompile_shader(),
                        SkBlendMode::kSrcOver),
           DrawTypeFlags::kNonAAFillRect,
           kRGBA_1_D_SRGB,
@@ -851,7 +811,7 @@ void VisitAndroidPrecompileSettings_Old(
 
         // 67% (2/3) handles 11 62 - due to the w/o msaa load variants not being used
         { LinearEffect(k0x188a0000__DISPLAY_P3__false__0x90a0000__Shader,
-                       ChildType::kHWTexture,
+                       create_hw_image_precompile_shader(),
                        SkBlendMode::kSrcOver,
                        /* paintColorIsOpaque= */ false),
           DrawTypeFlags::kAnalyticRRect,
@@ -861,7 +821,7 @@ void VisitAndroidPrecompileSettings_Old(
         // additions
         // 100% (1/1) handles 20
         { LinearEffect(k0x188a0000__DISPLAY_P3__false__0x90a0000__Shader,
-                       ChildType::kHWTexture,
+                       create_hw_image_precompile_shader(),
                        SkBlendMode::kSrcOver,
                        /* paintColorIsOpaque= */ true,
                        /* matrixColorFilter= */ true),
@@ -870,7 +830,7 @@ void VisitAndroidPrecompileSettings_Old(
 
         // 100% (1/1) handles 13
         { LinearEffect(k0x188a0000__DISPLAY_P3__false__0x90a0000__Shader,
-                       ChildType::kHWTexture,
+                       create_hw_image_precompile_shader(),
                        SkBlendMode::kSrcOver,
                        /* paintColorIsOpaque= */ false,
                        /* matrixColorFilter= */ true),
@@ -879,7 +839,7 @@ void VisitAndroidPrecompileSettings_Old(
 
         // 100% (1/1) handles 18
         { LinearEffect(k0x188a0000__DISPLAY_P3__false__0x90a0000__Shader,
-                       ChildType::kHWTexture,
+                       create_hw_image_precompile_shader(),
                        SkBlendMode::kSrcOver,
                        /* paintColorIsOpaque= */ true,
                        /* matrixColorFilter= */ true,
@@ -889,7 +849,7 @@ void VisitAndroidPrecompileSettings_Old(
 
         // 100% (1/1) handles 103
         { LinearEffect(kV0_SRGB__V0_SRGB__true__UNKNOWN__Shader,
-                       ChildType::kHWTexture,
+                       create_hw_image_precompile_shader(),
                        SkBlendMode::kSrcOver,
                        /* paintColorIsOpaque= */ true,
                        /* matrixColorFilter= */ false,
@@ -899,7 +859,7 @@ void VisitAndroidPrecompileSettings_Old(
 
         // 40: 100% (1/1) handles 114
         { LinearEffect(kV0_SRGB__V0_SRGB__true__UNKNOWN__Shader,
-                       ChildType::kHWTexture,
+                       create_hw_image_precompile_shader(),
                        SkBlendMode::kSrcOver,
                        /* paintColorIsOpaque= */ true,
                        /* matrixColorFilter= */ false,
@@ -909,7 +869,7 @@ void VisitAndroidPrecompileSettings_Old(
 
         // 100% (1/1) handles 108
         { LinearEffect(k0x188a0000__V0_SRGB__true__0x9010000__Shader,
-                       ChildType::kHWTexture,
+                       create_hw_image_precompile_shader(),
                        SkBlendMode::kSrcOver,
                        /* paintColorIsOpaque= */ true,
                        /* matrixColorFilter= */ true,
@@ -919,7 +879,7 @@ void VisitAndroidPrecompileSettings_Old(
 
         // 100% (1/1) handles 113
         { LinearEffect(k0x188a0000__V0_SRGB__true__0x9010000__Shader,
-                       ChildType::kHWTexture,
+                       create_hw_image_precompile_shader(),
                        SkBlendMode::kSrcOver,
                        /* paintColorIsOpaque= */ true,
                        /* matrixColorFilter= */ false,
@@ -929,7 +889,7 @@ void VisitAndroidPrecompileSettings_Old(
 
         // 100% (1/1) handles 120
         { LinearEffect(k0x188a0000__DISPLAY_P3__false__0x90a0000__Shader,
-                       ChildType::kHWTexture,
+                       create_hw_image_precompile_shader(),
                        SkBlendMode::kSrcOver,
                        /* paintColorIsOpaque= */ false),
           DrawTypeFlags::kNonAAFillRect | DrawTypeFlags::kAnalyticClip,
@@ -937,7 +897,7 @@ void VisitAndroidPrecompileSettings_Old(
 
         // 100% (1/1) handles 131
         { LinearEffect(k0x188a0000__DISPLAY_P3__false__0x90a0000__Shader,
-                       ChildType::kHWTexture,
+                       create_hw_image_precompile_shader(),
                        SkBlendMode::kSrcOver,
                        /* paintColorIsOpaque= */ true,
                        /* matrixColorFilter= */ true),
@@ -1096,7 +1056,12 @@ void VisitAndroidPrecompileSettings_Old(
 
         // 75% (3/4) handles 21 39 40
         { LinearEffect(kBT2020_ITU_PQ__BT2020__false__UNKNOWN__Shader,
-                       ChildType::kHWTextureYCbCr247,
+                       vulkan_ycbcr_image_shader(
+                           ycbcr_info(247,
+                                      VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_2020,
+                                      VK_SAMPLER_YCBCR_RANGE_ITU_NARROW,
+                                      VK_CHROMA_LOCATION_COSITED_EVEN),
+                          kRGBA8PremulPQ),
                        SkBlendMode::kSrcOver,
                        /* paintColorIsOpaque= */ true,
                        /* matrixColorFilter= */ false,
@@ -1107,7 +1072,12 @@ void VisitAndroidPrecompileSettings_Old(
 
         // 100% (1/1) handles 79
         { LinearEffect(kBT2020_ITU_PQ__BT2020__false__UNKNOWN__Shader,
-                       ChildType::kHWTextureYCbCr247,
+                       vulkan_ycbcr_image_shader(
+                           ycbcr_info(247,
+                                      VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_2020,
+                                      VK_SAMPLER_YCBCR_RANGE_ITU_NARROW,
+                                      VK_CHROMA_LOCATION_COSITED_EVEN),
+                           kRGBA8PremulPQ),
                        SkBlendMode::kSrcOver,
                        /* paintColorIsOpaque= */ true,
                        /* matrixColorFilter= */ false,
