@@ -365,7 +365,7 @@ public:
 
     DisjointStencilIndex add(CompressedPaintersOrder drawOrder, Rect rect) {
         auto& trees = fTrees[drawOrder];
-        DisjointStencilIndex stencil = DrawOrder::kUnassigned.next();
+        DisjointStencilIndex stencil = DisjointStencilIndex::First();
         for (auto&& tree : trees) {
             if (tree->add(rect)) {
                 return stencil;
@@ -374,6 +374,7 @@ public:
         }
 
         // If here, no existing intersection tree can hold the rect so add a new one
+        SkASSERT(stencil != DrawOrder::kUnassigned);
         IntersectionTree* newTree = this->makeTree();
         SkAssertResult(newTree->add(rect));
         trees.push_back(newTree);
@@ -536,6 +537,14 @@ Device::~Device() {
     // lifetime was validated when setImmutable() was called.
 #endif
 }
+
+#if defined(GPU_TEST_UTILS)
+
+int Device::testingOnly_pendingRenderSteps() const {
+    return fDC->pendingRenderSteps();
+}
+
+#endif
 
 void Device::setImmutable() {
     if (fRecorder) {
@@ -1747,7 +1756,7 @@ void Device::drawGeometry(const Transform& localToDevice,
     order.dependsOnPaintersOrder(clipOrder);
     // If a draw is not opaque, it must be drawn after the most recent draw it intersects with in
     // order to blend correctly.
-    if (shading.rendererCoverage() != Coverage::kNone || dstUsage != DstUsage::kNone) {
+    if (dstUsage & DstUsage::kDependsOnDst) {
         CompressedPaintersOrder prevDraw =
             fColorDepthBoundsManager->getMostRecentDraw(clip.drawBounds());
         order.dependsOnPaintersOrder(prevDraw);
@@ -1760,7 +1769,7 @@ void Device::drawGeometry(const Transform& localToDevice,
         DisjointStencilIndex setIndex = fDisjointStencilSet->add(order.paintOrder(),
                                                                  clip.drawBounds());
         order.dependsOnStencil(setIndex);
-    } else if (dstUsage == DstUsage::kNone && renderer->coverage() == Coverage::kNone &&
+    } else if (!(dstUsage & DstUsage::kDependsOnDst) &&
                style.isFillStyle() &&
                ((geometry.isEdgeAAQuad() && geometry.edgeAAQuad().isRect()) ||
                 (geometry.isShape() && geometry.shape().isRect()))) {
@@ -1790,7 +1799,7 @@ void Device::drawGeometry(const Transform& localToDevice,
                                    : renderer,
                             localToDevice, geometry, clip, order, paintID, dstUsage,
                             scopedDrawBuilder.gatherer(), &stroke);
-        } else if (dstUsage == DstUsage::kNone && renderer->useNonAAInnerFill()){
+        } else if ((dstUsage & DstUsage::kDstOnlyUsedByRenderer) && renderer->useNonAAInnerFill()) {
             // Possibly record an additional draw using the non-AA bounds renderer to fill the
             // interior with a renderer that can disable blending entirely.
             Rect innerFillBounds = get_inner_bounds(geometry, localToDevice);
@@ -1802,7 +1811,7 @@ void Device::drawGeometry(const Transform& localToDevice,
                 orderWithoutCoverage.reverseDepthAsStencil();
                 fDC->recordDraw(fRecorder->priv().rendererProvider()->nonAABounds(), localToDevice,
                                 Geometry(Shape(innerFillBounds)), clip, orderWithoutCoverage,
-                                paintID, dstUsage, scopedDrawBuilder.gatherer(), nullptr);
+                                paintID, DstUsage::kNone, scopedDrawBuilder.gatherer(), nullptr);
                 // Force the coverage draw to come after the non-AA draw in order to benefit from
                 // early depth testing.
                 order.dependsOnPaintersOrder(orderWithoutCoverage.paintOrder());
