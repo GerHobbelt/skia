@@ -1627,6 +1627,7 @@ static void test_convexity_doubleback(skiatest::Reporter* reporter) {
     }
 }
 
+#ifndef SK_HIDE_PATH_EDIT_METHODS
 static void check_convex_bounds(skiatest::Reporter* reporter, const SkPath& p,
                                 const SkRect& bounds) {
     REPORTER_ASSERT(reporter, p.isConvex());
@@ -1641,6 +1642,7 @@ static void check_convex_bounds(skiatest::Reporter* reporter, const SkPath& p,
     REPORTER_ASSERT(reporter, other.isConvex());
     REPORTER_ASSERT(reporter, other.getBounds() == bounds);
 }
+#endif
 
 static SkPath setFromString(const char str[]) {
     SkPathBuilder builder;
@@ -4456,6 +4458,7 @@ private:
 
 }  // namespace
 
+#ifndef SK_HIDE_PATH_EDIT_METHODS
 class PathTest_Private {
 public:
     static size_t GetFreeSpace(const SkPath& path) {
@@ -4542,6 +4545,7 @@ public:
         REPORTER_ASSERT(reporter, changed);
     }
 };
+#endif
 
 static void test_crbug_629455(skiatest::Reporter* reporter) {
     SkPath path = SkPathBuilder()
@@ -5085,9 +5089,11 @@ DEF_TEST(Paths, reporter) {
     test_addEmptyPath(reporter, SkPath::kAppend_AddPathMode);
     test_get_point(reporter);
     test_contains(reporter);
+#ifndef SK_HIDE_PATH_EDIT_METHODS
     PathTest_Private::TestPathTo(reporter);
     PathRefTest_Private::TestPathRef(reporter);
     PathTest_Private::TestPathrefListeners(reporter);
+#endif
     test_dump(reporter);
     test_path_crbug389050(reporter);
     test_path_crbugskia2820(reporter);
@@ -5481,55 +5487,6 @@ DEF_TEST(triangle_big, reporter) {
         { 0.666425824f, 4304.26172f },
     };
     draw_triangle(surface->getCanvas(), pts);
-}
-
-static SkPath add_verbs(int count) {
-    SkPathBuilder builder;
-    builder.moveTo(0, 0);
-    for (int i = 0; i < count; ++i) {
-        switch (i & 3) {
-            case 0: builder.lineTo(10, 20); break;
-            case 1: builder.quadTo(5, 6, 7, 8); break;
-            case 2: builder.conicTo(1, 2, 3, 4, 0.5f); break;
-            case 3: builder.cubicTo(2, 4, 6, 8, 10, 12); break;
-        }
-    }
-    return builder.detach();
-}
-
-// Make sure when we call shrinkToFit() that we always shrink (or stay the same)
-// and that if we call twice, we stay the same.
-DEF_TEST(Path_shrinkToFit, reporter) {
-    for (int verbs = 0; verbs < 100; ++verbs) {
-        SkPath unique_path = add_verbs(verbs),
-               shared_path = add_verbs(verbs);
-
-        const SkPath copy = shared_path;
-
-        REPORTER_ASSERT(reporter, shared_path == unique_path);
-        REPORTER_ASSERT(reporter, shared_path == copy);
-
-        uint32_t uID = unique_path.getGenerationID();
-        uint32_t sID = shared_path.getGenerationID();
-        uint32_t cID =        copy.getGenerationID();
-        REPORTER_ASSERT(reporter, sID == cID);
-
-        SkPathPriv::ShrinkToFit(&unique_path);
-        SkPathPriv::ShrinkToFit(&shared_path);
-        REPORTER_ASSERT(reporter, shared_path == unique_path);
-        REPORTER_ASSERT(reporter, shared_path == copy);
-
-        // since the unique_path is "unique", it's genID need not have changed even though
-        // unique_path has changed (been shrunk)
-        REPORTER_ASSERT(reporter, uID == unique_path.getGenerationID());
-        // since the copy has not been changed, its ID should be the same
-        REPORTER_ASSERT(reporter, cID == copy.getGenerationID());
-        // but since shared_path has changed, and was not uniquely owned, it's gen ID needs to have
-        // changed, breaking the "sharing" -- this is done defensively in case there were any
-        // outstanding Iterators active on copy, which could have been invalidated during
-        // shrinkToFit.
-        REPORTER_ASSERT(reporter, sID != shared_path.getGenerationID());
-    }
 }
 
 #ifndef SK_HIDE_PATH_EDIT_METHODS
@@ -6001,10 +5958,14 @@ DEF_TEST(path_filltype_utils, r) {
     const SkPath p2 = p1.makeFillType(SkPathFillType::kEvenOdd);
     REPORTER_ASSERT(r, p2 != p1);
     REPORTER_ASSERT(r, p2.getFillType() == SkPathFillType::kEvenOdd);
+#ifndef SK_HIDE_PATH_EDIT_METHODS
     REPORTER_ASSERT(r, PathTest_Private::GetPathRef(p2) == PathTest_Private::GetPathRef(p1));
+#endif
 
     const SkPath p3 = p2.makeToggleInverseFillType();
     REPORTER_ASSERT(r, p3 != p2);
     REPORTER_ASSERT(r, p3.getFillType() == SkPathFillType::kInverseEvenOdd);
+#ifndef SK_HIDE_PATH_EDIT_METHODS
     REPORTER_ASSERT(r, PathTest_Private::GetPathRef(p3) == PathTest_Private::GetPathRef(p2));
+#endif
 }

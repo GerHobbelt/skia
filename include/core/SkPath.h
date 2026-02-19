@@ -604,18 +604,6 @@ public:
         return this->makeTransform(SkMatrix::Scale(sx, sy));
     }
 
-#ifdef SK_SUPPORT_LEGACY_APPLYPERSPECTIVECLIP
-    void transform(const SkMatrix& matrix, SkPath* dst, SkApplyPerspectiveClip) const {
-        this->transform(matrix, dst);
-    }
-    void transform(const SkMatrix& matrix, SkApplyPerspectiveClip) {
-        this->transform(matrix);
-    }
-    SkPath makeTransform(const SkMatrix& m, SkApplyPerspectiveClip) const {
-        return this->makeTransform(m);
-    }
-#endif
-
     /** Return the last point, or {}
 
         @return The last if the path contains one or more SkPoint, else returns {}
@@ -2005,14 +1993,6 @@ private:
      */
     void setConvexity(SkPathConvexity convexity);
 
-    /** Shrinks SkPath verb array and SkPoint array storage to discard unused capacity.
-     *  May reduce the heap overhead for SkPath known to be fully constructed.
-     *
-     *  NOTE: This may relocate the underlying buffers, and thus any Iterators referencing
-     *        this path should be discarded after calling shrinkToFit().
-     */
-    void shrinkToFit();
-
     // Creates a new Path after the supplied arguments have been validated by
     // SkPathPriv::AnalyzeVerbs().
     static SkPath MakeInternal(const SkPathVerbAnalysis& analsis,
@@ -2022,15 +2002,9 @@ private:
                                SkPathFillType fillType,
                                bool isVolatile);
 
-    friend class SkAutoAddSimpleShape;
-    friend class SkAutoDisableOvalCheck;
+    friend class SkAutoAddSimpleShape;  // setConvexity
     friend class SkPathBuilder;
-    friend class SkPathEdgeIter;
-    friend class SkPathWriter;
-    friend class SkOpBuilder;
-    friend class SkBench_AddPathTest; // perf test reversePathTo
     friend class PathTest_Private; // unit test reversePathTo
-    friend class FuzzPath; // for legacy access to validateRef
 };
 
 #endif
