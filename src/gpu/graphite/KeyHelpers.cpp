@@ -567,7 +567,7 @@ ImageShaderBlock::ImageData::ImageData(const SkSamplingOptions& sampling,
 
 void ImageShaderBlock::AddBlock(const KeyContext& keyContext, const ImageData& imgData) {
     if (keyContext.recorder() && !imgData.fTextureProxy) {
-        keyContext.paintParamsKeyBuilder()->addBlock(BuiltInCodeSnippetID::kError);
+        keyContext.paintParamsKeyBuilder()->addErrorBlock();
         return;
     }
 
@@ -773,7 +773,7 @@ void YUVImageShaderBlock::AddBlock(const KeyContext& keyContext, const ImageData
     if (keyContext.recorder() &&
         (!imgData.fTextureProxies[0] || !imgData.fTextureProxies[1] ||
          !imgData.fTextureProxies[2] || !imgData.fTextureProxies[3])) {
-        keyContext.paintParamsKeyBuilder()->addBlock(BuiltInCodeSnippetID::kError);
+        keyContext.paintParamsKeyBuilder()->addErrorBlock();
         return;
     }
 
@@ -1449,7 +1449,7 @@ void add_children_to_key(const KeyContext& keyContext,
 
     for (size_t index = 0; index < children.size(); ++index) {
         const SkRuntimeEffect::ChildPtr& child = children[index];
-        KeyContextForRuntimeEffect childContext(keyContext, effect, index);
+        KeyContext childContext = keyContext.forRuntimeEffect(effect, index);
 
         std::optional<ChildType> type = child.type();
         if (type == ChildType::kShader) {
@@ -1630,8 +1630,8 @@ static void add_to_key(const KeyContext& keyContext, const SkWorkingFormatColorF
 
     SkAlphaType workingAT;
     sk_sp<SkColorSpace> workingCS = filter->workingFormat(dstCS, &workingAT);
-    SkColorInfo workingInfo(dstInfo.colorType(), workingAT, workingCS);
-    KeyContextWithColorInfo workingContext(keyContext, workingInfo);
+    KeyContext workingContext =
+            keyContext.withColorInfo({dstInfo.colorType(), workingAT, workingCS});
 
     // Use two nested compose blocks to chain (dst->working), child, and (working->dst) together
     // while appearing as one block to the parent node.
@@ -1752,9 +1752,13 @@ static void add_to_key(const KeyContext& keyContext, const SkCoordClampShader* s
 
     CoordClampShaderBlock::CoordClampData data(shader->subset());
 
-    KeyContextWithCoordClamp childContext(keyContext);
     CoordClampShaderBlock::BeginBlock(keyContext, data);
-    AddToKey(childContext, shader->shader().get());
+
+    // Subtleties in clamping implementation can lead to texture samples at non pixel aligned
+    // coordinates, particularly if clamped to non-texel centers.
+    AddToKey(keyContext.withExtraFlags(KeyGenFlags::kDisableSamplingOptimization),
+             shader->shader().get());
+
     keyContext.paintParamsKeyBuilder()->endBlock();
 }
 
@@ -1763,22 +1767,25 @@ static void add_to_key(const KeyContext& keyContext, const SkEmptyShader*) {
 }
 
 static void add_yuv_image_to_key(const KeyContext& keyContext,
-                                 const SkImageShader* origShader,
-                                 sk_sp<const SkImage> imageToDraw,
-                                 SkSamplingOptions sampling) {
+                                 const SkImage* imageToDraw,
+                                 SkRect subset,
+                                 SkSamplingOptions sampling,
+                                 SkTileMode tileModeX,
+                                 SkTileMode tileModeY,
+                                 bool isRaw) {
     SkASSERT(!imageToDraw->isAlphaOnly());
 
-    const Image_YUVA* yuvaImage = static_cast<const Image_YUVA*>(imageToDraw.get());
+    const Image_YUVA* yuvaImage = static_cast<const Image_YUVA*>(imageToDraw);
     const SkYUVAInfo& yuvaInfo = yuvaImage->yuvaInfo();
     // We would want to add a translation to the local matrix to handle other sitings.
     SkASSERT(yuvaInfo.sitingX() == SkYUVAInfo::Siting::kCentered);
     SkASSERT(yuvaInfo.sitingY() == SkYUVAInfo::Siting::kCentered);
 
     YUVImageShaderBlock::ImageData imgData(sampling,
-                                           origShader->tileModeX(),
-                                           origShader->tileModeY(),
+                                           tileModeX,
+                                           tileModeY,
                                            imageToDraw->dimensions(),
-                                           origShader->subset());
+                                           subset);
     for (int locIndex = 0; locIndex < SkYUVAInfo::kYUVAChannelCount; ++locIndex) {
         const TextureProxyView& view = yuvaImage->proxyView(locIndex);
         if (view) {
@@ -1880,7 +1887,7 @@ static void add_yuv_image_to_key(const KeyContext& keyContext,
     SkAlphaType srcAT = imageToDraw->alphaType() == kPremul_SkAlphaType
                                 ? kUnpremul_SkAlphaType
                                 : imageToDraw->alphaType();
-    if (origShader->isRaw()) {
+    if (isRaw) {
         // Because we've avoided the premul alpha step in the YUV shader, we need to make sure
         // it happens when drawing unpremul (i.e., non-opaque) images.
         steps = SkColorSpaceXformSteps(imageToDraw->colorSpace(),
@@ -1911,16 +1918,19 @@ static void add_yuv_image_to_key(const KeyContext& keyContext,
             });
 }
 
-static void add_to_key(const KeyContext& keyContext,
-                       const SkImageShader* shader) {
-    SkASSERT(shader);
-
+static void add_image_to_key(const KeyContext& keyContext,
+                             const SkImage* image,
+                             SkRect subset,
+                             SkSamplingOptions sampling,
+                             SkTileMode tileModeX,
+                             SkTileMode tileModeY,
+                             bool isRaw) {
     auto [ imageToDraw, newSampling ] = GetGraphiteBacked(keyContext.recorder(),
-                                                          shader->image().get(),
-                                                          shader->sampling());
+                                                          image,
+                                                          sampling);
     if (!imageToDraw) {
-        SKGPU_LOG_W("Couldn't convert ImageShader's image to a Graphite-backed image");
-        keyContext.paintParamsKeyBuilder()->addBlock(BuiltInCodeSnippetID::kError);
+        SKGPU_LOG_W("Couldn't convert SkImage a Graphite-backed representation");
+        keyContext.paintParamsKeyBuilder()->addErrorBlock();
         return;
     }
 
@@ -1939,19 +1949,22 @@ static void add_to_key(const KeyContext& keyContext,
                                                              keyContext.drawContext());
     if (as_IB(imageToDraw)->isYUVA()) {
         return add_yuv_image_to_key(keyContext,
-                                    shader,
-                                    std::move(imageToDraw),
-                                    newSampling);
+                                    imageToDraw.get(),
+                                    subset,
+                                    newSampling,
+                                    tileModeX,
+                                    tileModeY,
+                                    isRaw);
     }
 
     auto view = AsView(imageToDraw.get());
     SkASSERT(newSampling.mipmap == SkMipmapMode::kNone || view.mipmapped() == Mipmapped::kYes);
 
-    ImageShaderBlock::ImageData imgData(shader->sampling(),
-                                        shader->tileModeX(),
-                                        shader->tileModeY(),
+    ImageShaderBlock::ImageData imgData(newSampling,
+                                        tileModeX,
+                                        tileModeY,
                                         view.proxy()->dimensions(),
-                                        shader->subset());
+                                        subset);
 
     // Here we detect pixel aligned blit-like image draws. Some devices have low precision filtering
     // and will produce degraded (blurry) images unexpectedly for sequential exact pixel blits when
@@ -1981,7 +1994,7 @@ static void add_to_key(const KeyContext& keyContext,
     ColorSpaceTransformBlock::ColorSpaceTransformData colorXformData(
             SwizzleClassToReadEnum(readSwizzle));
 
-    if (!shader->isRaw()) {
+    if (!isRaw) {
         colorXformData.fSteps = SkColorSpaceXformSteps(imageToDraw->colorSpace(),
                                                        imageToDraw->alphaType(),
                                                        keyContext.dstColorInfo().colorSpace(),
@@ -2023,6 +2036,35 @@ static void add_to_key(const KeyContext& keyContext,
             });
 }
 
+static void add_to_key(const KeyContext& keyContext, const SkImageShader* shader) {
+    SkASSERT(shader);
+    add_image_to_key(keyContext, shader->image().get(), shader->subset(), shader->sampling(),
+                     shader->tileModeX(), shader->tileModeY(), shader->isRaw());
+}
+
+static SkMatrix get_xtra_image_local_matrix(const SkImage* image) {
+    // If the image is not graphite backed then we can assume the origin will be TopLeft as we
+    // require that in the ImageProvider utility. Also Graphite YUV images are assumed to be TopLeft
+    // origin.
+    SkASSERT(image);
+    const auto* imgBase = as_IB(image);
+    if (imgBase->isGraphiteBacked()) {
+        // The YUV formats can encode their own origin including reflection and rotation,
+        // so we need to concat that to the local matrix transform.
+        if (imgBase->isYUVA()) {
+            auto imgYUVA = static_cast<const Image_YUVA*>(imgBase);
+            return matrix_invert_or_identity(imgYUVA->yuvaInfo().originMatrix());
+        } else {
+            const auto& view = static_cast<const Image*>(imgBase)->textureProxyView();
+            if (view.origin() == Origin::kBottomLeft) {
+                return SkMatrix::ScaleTranslate(1.f, -1.f, 0.f, view.height());
+            }
+        }
+    }
+
+    return SkMatrix::I();
+}
+
 static void add_to_key(const KeyContext& keyContext, const SkLocalMatrixShader* shader) {
     SkASSERT(shader);
     auto wrappedShader = shader->wrappedShader().get();
@@ -2034,28 +2076,7 @@ static void add_to_key(const KeyContext& keyContext, const SkLocalMatrixShader* 
     SkShaderBase* wrappedShaderBase = as_SB(wrappedShader);
     if (wrappedShaderBase->type() == SkShaderBase::ShaderType::kImage) {
         auto imgShader = static_cast<const SkImageShader*>(wrappedShader);
-        // If the image is not graphite backed then we can assume the origin will be TopLeft as we
-        // require that in the ImageProvider utility. Also Graphite YUV images are assumed to be
-        // TopLeft origin.
-        auto imgBase = as_IB(imgShader->image());
-        if (imgBase->isGraphiteBacked()) {
-            // The YUV formats can encode their own origin including reflection and rotation,
-            // so we need to concat that to the local matrix transform.
-            if (imgBase->isYUVA()) {
-                auto imgYUVA = static_cast<const Image_YUVA*>(imgBase);
-                SkASSERT(imgYUVA);
-                matrix = matrix_invert_or_identity(imgYUVA->yuvaInfo().originMatrix());
-            } else {
-                auto imgGraphite = static_cast<Image*>(imgBase);
-                SkASSERT(imgGraphite);
-                const auto& view = imgGraphite->textureProxyView();
-                if (view.origin() == Origin::kBottomLeft) {
-                    matrix.setScaleY(-1);
-                    matrix.setTranslateY(view.height());
-                }
-            }
-
-        }
+        matrix = get_xtra_image_local_matrix(imgShader->image().get());
     } else if (wrappedShaderBase->type() == SkShaderBase::ShaderType::kGradientBase) {
         auto gradShader = static_cast<const SkGradientBaseShader*>(wrappedShader);
         matrix = gradShader->getGradientMatrix();
@@ -2121,7 +2142,7 @@ static void add_to_key(const KeyContext& keyContext, const SkPerlinNoiseShader* 
 
     if (!perm || !noise) {
         SKGPU_LOG_W("Couldn't create tables for PerlinNoiseShader");
-        keyContext.paintParamsKeyBuilder()->addBlock(BuiltInCodeSnippetID::kError);
+        keyContext.paintParamsKeyBuilder()->addErrorBlock();
         return;
     }
 
@@ -2160,7 +2181,7 @@ static void add_to_key(const KeyContext& keyContext,
                                                        props);
     if (!info.success) {
         SKGPU_LOG_W("Couldn't access PictureShaders' Image info");
-        keyContext.paintParamsKeyBuilder()->addBlock(BuiltInCodeSnippetID::kError);
+        keyContext.paintParamsKeyBuilder()->addErrorBlock();
         return;
     }
 
@@ -2180,7 +2201,7 @@ static void add_to_key(const KeyContext& keyContext,
                                            &info.props);
     if (!surface) {
         SKGPU_LOG_W("Could not create surface to render PictureShader");
-        keyContext.paintParamsKeyBuilder()->addBlock(BuiltInCodeSnippetID::kError);
+        keyContext.paintParamsKeyBuilder()->addErrorBlock();
         return;
     }
 
@@ -2190,7 +2211,7 @@ static void add_to_key(const KeyContext& keyContext,
     // list this works out okay, but will need to be addressed before we move off that system.
     if (!img) {
         SKGPU_LOG_W("Couldn't create SkImage for PictureShader");
-        keyContext.paintParamsKeyBuilder()->addBlock(BuiltInCodeSnippetID::kError);
+        keyContext.paintParamsKeyBuilder()->addErrorBlock();
         return;
     }
 
@@ -2199,7 +2220,7 @@ static void add_to_key(const KeyContext& keyContext,
                                                 SkSamplingOptions(shader->filter()), &shaderLM);
     if (!imgShader) {
         SKGPU_LOG_W("Couldn't create SkImageShader for PictureShader");
-        keyContext.paintParamsKeyBuilder()->addBlock(BuiltInCodeSnippetID::kError);
+        keyContext.paintParamsKeyBuilder()->addErrorBlock();
         return;
     }
 
@@ -2229,13 +2250,13 @@ static void add_to_key(const KeyContext& keyContext,
 static void add_to_key(const KeyContext& keyContext,
                        const SkTransformShader* shader) {
     SKGPU_LOG_W("Raster-only SkShader (SkTransformShader) encountered");
-    keyContext.paintParamsKeyBuilder()->addBlock(BuiltInCodeSnippetID::kError);
+    keyContext.paintParamsKeyBuilder()->addErrorBlock();
 }
 
 static void add_to_key(const KeyContext& keyContext,
                        const SkTriColorShader* shader) {
     SKGPU_LOG_W("Raster-only SkShader (SkTriColorShader) encountered");
-    keyContext.paintParamsKeyBuilder()->addBlock(BuiltInCodeSnippetID::kError);
+    keyContext.paintParamsKeyBuilder()->addErrorBlock();
 }
 
 static void add_to_key(const KeyContext& keyContext,
@@ -2253,9 +2274,7 @@ static void add_to_key(const KeyContext& keyContext,
     sk_sp<SkColorSpace> inputCS, outputCS;
     SkAlphaType workingAT;
     std::tie(inputCS, outputCS, workingAT) = shader->workingSpace(dstCS, dstAT);
-
-    SkColorInfo workingInfo(dstInfo.colorType(), workingAT, inputCS);
-    KeyContextWithColorInfo workingContext(keyContext, workingInfo);
+    KeyContext workingContext = keyContext.withColorInfo({dstInfo.colorType(), workingAT, inputCS});
 
     // Compose the inner shader (in the input space) with a (output->dst) transform, under the
     // assumption that the child shader handles conversion between input and output CS/alpha types.
@@ -2383,7 +2402,7 @@ static void add_gradient_to_key(const KeyContext& keyContext,
                     create_color_and_offset_bitmap(colorCount, colors, positions);
             if (colorsAndOffsetsBitmap.empty()) {
                 SKGPU_LOG_W("Couldn't create GradientShader's color and offset bitmap");
-                keyContext.paintParamsKeyBuilder()->addBlock(BuiltInCodeSnippetID::kError);
+                keyContext.paintParamsKeyBuilder()->addErrorBlock();
                 return;
             }
             shader->setCachedBitmap(colorsAndOffsetsBitmap);
@@ -2393,7 +2412,7 @@ static void add_gradient_to_key(const KeyContext& keyContext,
                                                 "GradientTexture");
         if (!proxy) {
             SKGPU_LOG_W("Couldn't create GradientShader's color and offset bitmap proxy");
-            keyContext.paintParamsKeyBuilder()->addBlock(BuiltInCodeSnippetID::kError);
+            keyContext.paintParamsKeyBuilder()->addErrorBlock();
             return;
         }
     }

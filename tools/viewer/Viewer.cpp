@@ -70,6 +70,7 @@
 #include "tools/trace/EventTracingPriv.h"
 #include "tools/viewer/AnimatedImageSlide.h"
 #include "tools/viewer/BisectSlide.h"
+#include "tools/viewer/CaptureSlide.h"
 #include "tools/viewer/GMSlide.h"
 #include "tools/viewer/ImageSlide.h"
 #include "tools/viewer/MSKPSlide.h"
@@ -270,6 +271,7 @@ static DEFINE_string(jxls   , PATH_PREFIX "jxls"   , "Directory to read jxls fro
 static DEFINE_string(skps   , PATH_PREFIX "skps"   , "Directory to read skps from.");
 static DEFINE_string(mskps  , PATH_PREFIX "mskps"  , "Directory to read mskps from.");
 static DEFINE_string(lotties, PATH_PREFIX "lotties", "Directory to read (Bodymovin) jsons from.");
+static DEFINE_string(captures, PATH_PREFIX "captures", "Directory to read SkCaptures from.");
 #undef PATH_PREFIX
 
 static DEFINE_string(svgs, "", "Directory to read SVGs from, or a single SVG file.");
@@ -288,7 +290,10 @@ static bool is_graphite_backend_type(sk_app::Window::BackendType type) {
 #if defined(SK_GRAPHITE)
     switch (type) {
 #ifdef SK_DAWN
-        case sk_app::Window::kGraphiteDawn_BackendType:
+        case sk_app::Window::kGraphiteDawnD3D12_BackendType:
+        case sk_app::Window::kGraphiteDawnMetal_BackendType:
+        case sk_app::Window::kGraphiteDawnOpenGLES_BackendType:
+        case sk_app::Window::kGraphiteDawnVulkan_BackendType:
 #endif
 #ifdef SK_METAL
         case sk_app::Window::kGraphiteMetal_BackendType:
@@ -352,7 +357,10 @@ const char* get_backend_string(sk_app::Window::BackendType type) {
     switch (type) {
         case sk_app::Window::kNativeGL_BackendType: return "OpenGL";
         case sk_app::Window::kANGLE_BackendType: return "ANGLE";
-        case sk_app::Window::kGraphiteDawn_BackendType: return "Dawn (Graphite)";
+        case sk_app::Window::kGraphiteDawnD3D12_BackendType: return "Dawn D3D12 (Graphite)";
+        case sk_app::Window::kGraphiteDawnMetal_BackendType: return "Dawn Metal (Graphite)";
+        case sk_app::Window::kGraphiteDawnOpenGLES_BackendType: return "Dawn OpenGLES (Graphite)";
+        case sk_app::Window::kGraphiteDawnVulkan_BackendType: return "Dawn Vulkan (Graphite)";
         case sk_app::Window::kVulkan_BackendType: return "Vulkan";
         case sk_app::Window::kGraphiteVulkan_BackendType: return "Vulkan (Graphite)";
         case sk_app::Window::kMetal_BackendType: return "Metal";
@@ -367,8 +375,14 @@ const char* get_backend_string(sk_app::Window::BackendType type) {
 
 static sk_app::Window::BackendType get_backend_type(const char* str) {
 #if defined(SK_DAWN) && defined(SK_GRAPHITE)
-    if (0 == strcmp(str, "grdawn")) {
-        return sk_app::Window::kGraphiteDawn_BackendType;
+    if (0 == strcmp(str, "grdawn_vk")) {
+        return sk_app::Window::kGraphiteDawnVulkan_BackendType;
+    } else if (0 == strcmp(str, "grdawn_metal")) {
+        return sk_app::Window::kGraphiteDawnMetal_BackendType;
+    } else if (0 == strcmp(str, "grdawn_gles")) {
+        return sk_app::Window::kGraphiteDawnOpenGLES_BackendType;
+    } else if (0 == strcmp(str, "grdawn_vk")) {
+        return sk_app::Window::kGraphiteDawnVulkan_BackendType;
     } else
 #endif
 
@@ -496,7 +510,16 @@ static const Window::BackendType kSupportedBackends[] = {
 #endif
 
 #if defined(SK_DAWN) && defined(SK_GRAPHITE)
-        sk_app::Window::kGraphiteDawn_BackendType,
+#if defined(SK_BUILD_FOR_WIN)
+        sk_app::Window::kGraphiteDawnD3D12_BackendType,
+#endif
+#if defined(SK_BUILD_FOR_MAC) || defined(SK_BUILD_FOR_IOS)
+        sk_app::Window::kGraphiteDawnMetal_BackendType,
+#endif
+#if defined(SK_BUILD_FOR_UNIX) || defined(SK_BUILD_FOR_ANDROID)
+        sk_app::Window::kGraphiteDawnOpenGLES_BackendType,
+        sk_app::Window::kGraphiteDawnVulkan_BackendType,
+#endif
 #endif
 
 #if defined(SK_VULKAN)
@@ -1078,6 +1101,12 @@ void Viewer::initSlides() {
              return sk_make_sp<SvgSlide>(name, path);
          }},
 #endif
+         {".capt",
+         "capture-dir",
+         FLAGS_captures,
+         [](const SkString& name, const SkString& path) -> sk_sp<Slide> {
+             return sk_make_sp<CaptureSlide>(name, path);
+         }},
     };
 
     TArray<sk_sp<Slide>> dirSlides;
@@ -2308,9 +2337,24 @@ void Viewer::drawImGui() {
 #endif
 
 #if defined(SK_DAWN) && defined(SK_GRAPHITE)
+#if defined(SK_BUILD_FOR_WIN)
                 ImGui::SameLine();
-                ImGui::RadioButton("Dawn (Graphite)", &newBackend,
-                                   sk_app::Window::kGraphiteDawn_BackendType);
+                ImGui::RadioButton("Dawn D3D12 (Graphite)", &newBackend,
+                                   sk_app::Window::kGraphiteDawnD3D12_BackendType);
+#endif
+#if defined(SK_BUILD_FOR_MAC) || defined(SK_BUILD_FOR_IOS)
+                ImGui::SameLine();
+                ImGui::RadioButton("Dawn Metal (Graphite)", &newBackend,
+                                   sk_app::Window::kGraphiteDawnMetal_BackendType);
+#endif
+#if defined(SK_BUILD_FOR_UNIX) || defined(SK_BUILD_FOR_ANDROID)
+                ImGui::SameLine();
+                ImGui::RadioButton("Dawn OpenGLES (Graphite)", &newBackend,
+                                   sk_app::Window::kGraphiteDawnOpenGLES_BackendType);
+                ImGui::SameLine();
+                ImGui::RadioButton("Dawn Vulkan (Graphite)", &newBackend,
+                                   sk_app::Window::kGraphiteDawnVulkan_BackendType);
+#endif
 #endif
 
 
@@ -2952,7 +2996,7 @@ void Viewer::drawImGui() {
                             CachedShader& entry(fCachedShaders.push_back());
                             entry.fKey = nullptr;
                             entry.fKeyString = SkStringPrintf("#%-3d %s",
-                                                              index++, pipelineInfo.fLabel.c_str());
+                                                              index++, pipeline->getLabel());
 
                             if (sksl) {
                                 entry.fShader[CachedShader::kVertexIndex].fText =
