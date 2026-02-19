@@ -60,7 +60,7 @@ const (
 	DEBIAN_11_OS         = "Debian-11.5"
 	DEBIAN_10_OS         = "Debian-10.10"
 	DEFAULT_OS_LINUX_GCE = UBUNTU_24_04_OS
-	DEFAULT_OS_MAC       = "Mac-14.5"
+	DEFAULT_OS_MAC       = "Mac-15.7"
 	DEFAULT_OS_WIN_GCE   = "Windows-11-22631"
 	UBUNTU_20_04_OS      = "Ubuntu-20.04"
 	UBUNTU_22_04_OS      = "Ubuntu-22.04"
@@ -895,7 +895,7 @@ func (b *TaskBuilder) defaultSwarmDimensions() {
 			"Mac12":       "Mac-12",
 			"Mac13":       "Mac-13",
 			"Mac14":       "Mac-14.7", // Builds run on 14.5, tests on 14.7.
-			"Mac15":       "Mac-15.3",
+			"Mac15":       "Mac-15.7",
 			"Mokey":       "Android",
 			"MokeyGo32":   "Android",
 			"Ubuntu20.04": UBUNTU_20_04_OS,
@@ -917,6 +917,9 @@ func (b *TaskBuilder) defaultSwarmDimensions() {
 		if os == "Win11" && b.Model("GCE") {
 			d["os"] = DEFAULT_OS_WIN_GCE
 			d["gce"] = "1"
+		}
+		if os == "Win11" && b.GPU("IntelUHDGraphics770") {
+			d["os"] = "Windows-11-26200.6584"
 		}
 		if strings.Contains(os, "iOS") {
 			d["pool"] = "SkiaIOS"
@@ -991,6 +994,9 @@ func (b *TaskBuilder) defaultSwarmDimensions() {
 				"AppleM3": {
 					"MacBookPro15.3": {"cpu": "arm64-64-Apple_M3"},
 				},
+				"AppleM4": {
+					"MacMini16.10": {"cpu": "arm64-64-Apple_M4"},
+				},
 				"AppleIntel": {
 					"MacBookPro15.1": {"cpu": "x86-64"},
 					"MacBookPro16.2": {"cpu": "x86-64"},
@@ -1047,18 +1053,19 @@ func (b *TaskBuilder) defaultSwarmDimensions() {
 			// It's a GPU job.
 			if b.MatchOs("Win") {
 				gpu, ok := map[string]string{
-					"GTX1660":       "10de:2184-31.0.15.4601",
-					"IntelHD4400":   "8086:0a16-10.0.26100.1",
-					"IntelIris540":  "8086:1926-26.20.100.7528",
-					"IntelIris6100": "8086:162b-20.19.15.5171",
-					"IntelIris655":  "8086:3ea5-26.20.100.7463",
-					"IntelIrisXe":   "8086:9a49-31.0.101.5333",
-					"RadeonHD7770":  "1002:683d-26.20.13031.18002",
-					"RadeonR9M470X": "1002:6646-21.19.136.0",
-					"QuadroP400":    "10de:1cb3-31.0.15.5222",
-					"RadeonVega6":   "1002:1636-31.0.14057.5006",
-					"RadeonVega8":   "1002:1638-31.0.21916.2",
-					"RTX3060":       "10de:2489-32.0.15.7270",
+					"GTX1660":             "10de:2184-31.0.15.4601",
+					"IntelHD4400":         "8086:0a16-10.0.26100.1",
+					"IntelIris540":        "8086:1926-31.0.101.2115",
+					"IntelIris6100":       "8086:162b-20.19.15.5171",
+					"IntelIris655":        "8086:3ea5-26.20.100.7463",
+					"IntelIrisXe":         "8086:9a49-31.0.101.5333",
+					"IntelUHDGraphics770": "8086:a780-31.0.101.5333",
+					"RadeonHD7770":        "1002:683d-26.20.13031.18002",
+					"RadeonR9M470X":       "1002:6646-21.19.136.0",
+					"QuadroP400":          "10de:1cb3-31.0.15.5222",
+					"RadeonVega6":         "1002:1636-31.0.14057.5006",
+					"RadeonVega8":         "1002:1638-31.0.21916.2",
+					"RTX3060":             "10de:2489-32.0.15.7270",
 				}[b.Parts["cpu_or_gpu_value"]]
 				if !ok {
 					log.Fatalf("Entry %q not found in Win GPU mapping.", b.Parts["cpu_or_gpu_value"])
@@ -1086,6 +1093,7 @@ func (b *TaskBuilder) defaultSwarmDimensions() {
 				gpu, ok := map[string]string{
 					"AppleM1":             "AppleM1",
 					"AppleM3":             "apple:m3",
+					"AppleM4":             "apple:m4",
 					"IntelHD6000":         "8086:1626",
 					"IntelHD615":          "8086:591e",
 					"IntelIris5100":       "8086:0a2e",
@@ -1134,6 +1142,7 @@ func (b *TaskBuilder) defaultSwarmDimensions() {
 					"Mac13": "",
 					"Mac14": "Macmini9,1",
 				},
+				"MacMini16.10": "Mac16,10",
 				// TODO(borenet): This is currently resolving to multiple
 				// different actual device types.
 				"VMware7.1": "",
@@ -1167,10 +1176,18 @@ func (b *TaskBuilder) defaultSwarmDimensions() {
 			// Use many-core machines for Build tasks.
 			d["machine_type"] = MACHINE_TYPE_LARGE
 		} else if d["os"] == DEFAULT_OS_MAC {
-			// Mac CPU bots are no longer VMs.
-			d["cpu"] = "x86-64"
-			d["cores"] = "12"
-			delete(d, "gpu")
+			if b.MatchExtraConfig("iOS") {
+				// TODO(borenet): Remove this special case (and the associated
+				// machines) once the new machines have the certs needed to
+				// build for iOS.
+				d["os"] = "Mac-14.5"
+				d["cpu"] = "x86-64"
+				d["cores"] = "12"
+				delete(d, "gpu")
+			} else {
+				d["mac_model"] = "Mac16,10"
+				delete(d, "gpu")
+			}
 		}
 	}
 
@@ -1343,14 +1360,14 @@ func (b *jobBuilder) compile() string {
 					Name: "xcode",
 					Path: "cache/Xcode.app",
 				})
-				b.asset("ccache_mac")
-				b.usesCCache()
+				// b.asset("ccache_mac")
+				// b.usesCCache()
 				if b.MatchExtraConfig("iOS.*") {
 					b.asset("provisioning_profile_ios")
 				}
 				if b.shellsOutToBazel() {
-					// All of our current Mac compile machines are x64 Mac only.
-					b.usesBazel("mac_x64")
+					// All of our current Mac compile machines are arm64 Mac only.
+					b.usesBazel("mac_arm64")
 					b.attempts(1)
 				}
 			}
