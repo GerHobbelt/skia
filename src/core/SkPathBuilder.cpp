@@ -105,9 +105,23 @@ SkPathBuilder& SkPathBuilder::operator=(const SkPath& src) {
     return *this;
 }
 
-void SkPathBuilder::incReserve(int extraPtCount, int extraVbCount) {
+bool SkPathBuilder::operator==(const SkPathBuilder& o) const {
+    // quick-accept
+    if (this == &o) {
+        return true;
+    }
+    // quick-reject
+    if (fSegmentMask != o.fSegmentMask || fFillType != o.fFillType) {
+        return false;
+    }
+    // deep compare
+    return fVerbs == o.fVerbs && fPts == o.fPts && fConicWeights == o.fConicWeights;
+}
+
+void SkPathBuilder::incReserve(int extraPtCount, int extraVbCount, int extraCnCount) {
     fPts.reserve_exact(Sk32_sat_add(fPts.size(), extraPtCount));
     fVerbs.reserve_exact(Sk32_sat_add(fVerbs.size(), extraVbCount));
+    fConicWeights.reserve_exact(Sk32_sat_add(fConicWeights.size(), extraCnCount));
 }
 
 std::tuple<SkPoint*, SkScalar*> SkPathBuilder::growForVerbsInPath(const SkPathRef& path) {
@@ -680,7 +694,7 @@ SkPathIter SkPathBuilder::iter() const {
 }
 
 SkPathBuilder& SkPathBuilder::addRaw(const SkPathRaw& raw) {
-    this->incReserve(raw.points().size(), raw.verbs().size());
+    this->incReserve(raw.points().size(), raw.verbs().size(), raw.conics().size());
 
     for (auto iter = raw.iter(); auto rec = iter.next();) {
         const auto pts = rec->fPoints;
@@ -773,7 +787,7 @@ SkPathBuilder& SkPathBuilder::polylineTo(SkSpan<const SkPoint> pts) {
         this->ensureMove();
 
         const auto count = pts.size();
-        this->incReserve(count, count);
+        this->incReserve(count, count, 0);
         memcpy(fPts.push_back_n(count), pts.data(), count * sizeof(SkPoint));
         memset(fVerbs.push_back_n(count), (uint8_t)SkPathVerb::kLine, count);
         fSegmentMask |= kLine_SkPathSegmentMask;

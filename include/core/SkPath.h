@@ -82,8 +82,12 @@ public:
                       SkSpan<const SkScalar> conics,
                       SkPathFillType, bool isVolatile = false);
 
-    static SkPath Rect(const SkRect&, SkPathDirection = SkPathDirection::kDefault,
+    static SkPath Rect(const SkRect&, SkPathFillType, SkPathDirection = SkPathDirection::kDefault,
                        unsigned startIndex = 0);
+    static SkPath Rect(const SkRect& r, SkPathDirection direction = SkPathDirection::kDefault,
+                       unsigned startIndex = 0) {
+        return Rect(r, SkPathFillType::kDefault, direction, startIndex);
+    }
     static SkPath Oval(const SkRect&, SkPathDirection = SkPathDirection::kDefault);
     static SkPath Oval(const SkRect&, SkPathDirection, unsigned startIndex);
     static SkPath Circle(SkScalar center_x, SkScalar center_y, SkScalar radius,
@@ -111,14 +115,15 @@ public:
                    conics, fillType, isVolatile);
     }
 
-    /** Constructs an empty SkPath. By default, SkPath has no verbs, no SkPoint, and no weights.
-        FillType is set to kWinding.
+    /** Constructs an empty SkPath: no verbs, no points, no conic weights.
 
         @return  empty SkPath
 
         example: https://fiddle.skia.org/c/@Path_empty_constructor
     */
-    SkPath();
+    explicit SkPath(SkPathFillType);
+
+    SkPath() : SkPath(SkPathFillType::kDefault) {}
 
     /** Constructs a copy of an existing path.
         Copy constructor makes two paths identical by value. Internally, path and
@@ -740,16 +745,6 @@ public:
         fFillType ^= 2;
     }
 
-#ifdef SK_HIDE_PATH_EDIT_METHODS
-private:
-#endif
-    /** Returns a copy of this path in the current state, and resets the path to empty. */
-    SkPath detach() {
-        SkPath result = *this;
-        this->reset();
-        return result;
-    }
-
     /** Sets SkPath to its initial state.
         Removes verb array, SkPoint array, and weights, and sets FillType to kWinding.
         Internal storage associated with SkPath is released.
@@ -759,6 +754,16 @@ private:
         example: https://fiddle.skia.org/c/@Path_reset
     */
     SkPath& reset();
+
+#ifdef SK_HIDE_PATH_EDIT_METHODS
+private:
+#endif
+    /** Returns a copy of this path in the current state, and resets the path to empty. */
+    SkPath detach() {
+        SkPath result = *this;
+        this->reset();
+        return result;
+    }
 
     /** Sets SkPath to its initial state, preserving internal storage.
         Removes verb array, SkPoint array, and weights, and sets FillType to kWinding.
