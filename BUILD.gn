@@ -24,9 +24,6 @@ config("skia_public") {
   defines = [
     "SK_CODEC_DECODES_BMP",
     "SK_CODEC_DECODES_WBMP",
-
-    # TODO(kjlubick,fmalita) Remove when clients updated and APIs deleted.
-    "SK_HIDE_PATH_EDIT_METHODS",
   ]
   cflags_objcc = []
   if (is_component_build) {
@@ -2413,6 +2410,8 @@ if (skia_enable_tools) {
           sources += [
             "tools/graphite/dawn/GraphiteDawnTestContext.cpp",
             "tools/graphite/dawn/GraphiteDawnTestContext.h",
+            "tools/graphite/dawn/GraphiteDawnToggles.cpp",
+            "tools/graphite/dawn/GraphiteDawnToggles.h",
           ]
         }
         if (skia_use_metal) {
@@ -3148,41 +3147,6 @@ if (skia_enable_tools) {
           "modules/skottie",
           "modules/skshaper",
           "modules/skunicode",
-        ]
-      }
-
-      test_app("jetski") {
-        is_shared_library = true
-
-        sources = [
-          "modules/jetski/src/Canvas.cpp",
-          "modules/jetski/src/ColorFilters.cpp",
-          "modules/jetski/src/Gradients.cpp",
-          "modules/jetski/src/Image.cpp",
-          "modules/jetski/src/ImageFilter.cpp",
-          "modules/jetski/src/JetSki.cpp",
-          "modules/jetski/src/Matrix.cpp",
-          "modules/jetski/src/Paint.cpp",
-          "modules/jetski/src/Path.cpp",
-          "modules/jetski/src/PathBuilder.cpp",
-          "modules/jetski/src/RuntimeShaderBuilder.cpp",
-          "modules/jetski/src/Shader.cpp",
-          "modules/jetski/src/SkottieAnimation.cpp",
-          "modules/jetski/src/Surface.cpp",
-          "modules/jetski/src/Surface.h",
-          "modules/jetski/src/SurfaceThread.cpp",
-          "modules/jetski/src/SurfaceThread.h",
-          "modules/jetski/src/Utils.cpp",
-        ]
-        libs = [
-          "android",
-          "jnigraphics",
-        ]
-
-        deps = [
-          ":skia",
-          "modules/skottie",
-          "tools/window",
         ]
       }
     }
