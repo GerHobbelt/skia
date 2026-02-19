@@ -313,7 +313,7 @@ optional("android_utils") {
 }
 
 optional("fontmgr_android_parser") {
-  enabled = true
+  enabled = skia_use_expat
 
   deps = [ "//third_party/expat" ]
   sources = skia_ports_fontmgr_android_parser_sources
@@ -1507,7 +1507,9 @@ if (skia_use_fontations || skia_use_rust_png_decode ||
     # Allow multiple definitions because Bazel's rust_static_library includes
     # transitive C++ dependencies, which can lead to duplicate symbols when
     # linking multiple Rust libraries together.
-    ldflags = [ "-Wl,--allow-multiple-definition" ]
+    if (!is_mac) {
+      ldflags = [ "-Wl,--allow-multiple-definition" ]
+    }
   }
 }
 
