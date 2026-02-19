@@ -3,7 +3,7 @@
   "direct": [
     {
       "build_file": "//bazel/external/dawn:BUILD.bazel",
-      "commit": "0f561487ff7a031cb91788359dd487bc87473536",
+      "commit": "ff654f69aca0a3ffab8b6468ea334af4b74af360",
       "name": "dawn",
       "remote": "https://dawn.googlesource.com/dawn.git"
     },
@@ -30,7 +30,7 @@
     },
     {
       "build_file": "//bazel/external/freetype:BUILD.bazel",
-      "commit": "26adb9ff98f9ea002c8d22a43d0d3c0c9534d40b",
+      "commit": "b91f75bd02db43b06d634591eb286d3eb0ce3b65",
       "name": "freetype",
       "patches": [
         "//bazel/external/freetype:config_files.patch"
@@ -149,7 +149,7 @@
       "remote": "https://skia.googlesource.com/external/github.com/KhronosGroup/SPIRV-Headers.git"
     },
     {
-      "commit": "6a1c3fe937dc7334a6703dafae6dae8d38408c07",
+      "commit": "65b2ace21293057714b7fa1e87bd764d3dcef305",
       "name": "spirv_tools",
       "remote": "https://skia.googlesource.com/external/github.com/KhronosGroup/SPIRV-Tools.git"
     },
@@ -161,19 +161,19 @@
     },
     {
       "build_file": "//bazel/external/vulkan_headers:BUILD.bazel",
-      "commit": "0aae9c6b5f99d63a5eb7d69a3a1a95e2fa239bc2",
+      "commit": "0777a3ad88bad5f4b11cfd509458bbc0ddadc773",
       "name": "vulkan_headers",
       "remote": "https://chromium.googlesource.com/external/github.com/KhronosGroup/Vulkan-Headers"
     },
     {
       "build_file": "//bazel/external/vulkan_tools:BUILD.bazel",
-      "commit": "e8a4ce73f3244d814ccc84e723bb0442fab4dcf7",
+      "commit": "155fa739805a96ae1a5f0cc9f0847e8e8f34725b",
       "name": "vulkan_tools",
       "remote": "https://chromium.googlesource.com/external/github.com/KhronosGroup/Vulkan-Tools"
     },
     {
       "build_file": "//bazel/external/vulkan_utility_libraries:BUILD.bazel",
-      "commit": "9a3f4105c16bde4e2717eeab0fcc5a49236f7294",
+      "commit": "b4e9ebbfc779cba85f1efbe2f69fdfc5744ed5e5",
       "name": "vulkan_utility_libraries",
       "remote": "https://chromium.googlesource.com/external/github.com/KhronosGroup/Vulkan-Utility-Libraries"
     },
