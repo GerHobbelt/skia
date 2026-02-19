@@ -90,6 +90,12 @@ public:
         return SkRect::Bounds(fPts);
     }
 
+    /** Like computeFiniteBounds() but returns a 'tight' bounds, meaning when there are curve
+     *  segments, this computes the X/Y limits of the curve itself, not the curve's control
+     *  point(s). For a polygon, this returns the same as computeFiniteBounds().
+    */
+    std::optional<SkRect> computeTightBounds() const;
+
     // DEPRECATED -- returns "empty" if the bounds are non-finite
     SkRect computeBounds() const {
         if (auto bounds = this->computeFiniteBounds()) {
@@ -885,7 +891,7 @@ public:
         unmodified by the original SkPathFillType.
     */
     SkPathBuilder& toggleInverseFillType() {
-        fFillType = (SkPathFillType)((unsigned)fFillType ^ 2);
+        fFillType = SkPathFillType_ToggleInverse(fFillType);
         return *this;
     }
 
@@ -967,6 +973,8 @@ public:
     // can't use default argument easily in debugger, so we name this
     // helper explicitly.
     void dump() const { this->dump(DumpFormat::kDecimal); }
+
+    bool contains(SkPoint) const;
 
 private:
     SkPathRef::PointsArray fPts;

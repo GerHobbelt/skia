@@ -1861,16 +1861,6 @@ if (is_wasm) {
   }
 }
 
-skia_static_library("pathkit") {
-  check_includes = false
-  public_configs = [ ":skia_public" ]
-  configs = skia_library_configs
-
-  sources = skia_pathops_sources
-
-  deps = [ ":skia" ]
-}
-
 group("modules") {
   deps = [
     "modules/bentleyottmann",
@@ -2507,13 +2497,15 @@ if (skia_enable_tools) {
   if (skia_enable_ganesh) {
     test_lib("test") {
       sources = [
+        "tests/ComparePixels.cpp",
+        "tests/ComparePixels.h",
         "tests/CtsEnforcement.cpp",
         "tests/Test.cpp",
         "tests/Test.h",
         "tests/TestHarness.cpp",
         "tests/TestHarness.h",
-        "tests/TestUtils.cpp",
-        "tests/TestUtils.h",
+        "tests/ganesh/GaneshTestUtils.cpp",
+        "tests/ganesh/GaneshTestUtils.h",
       ]
       deps = [
         ":flags",

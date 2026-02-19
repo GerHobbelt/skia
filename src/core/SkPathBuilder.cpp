@@ -925,14 +925,15 @@ SkPathBuilder& SkPathBuilder::addPath(const SkPath& src, const SkMatrix& matrix,
 
 // ignore the last point of the 1st contour
 SkPathBuilder& SkPathBuilder::privateReversePathTo(const SkPath& path) {
-    if (path.fPathRef->fVerbs.empty()) {
+    auto verbSpan = path.verbs();
+    if (verbSpan.empty()) {
         return *this;
     }
 
-    const SkPathVerb* verbs = path.fPathRef->verbsEnd();
-    const SkPathVerb* verbsBegin = path.fPathRef->verbsBegin();
-    const SkPoint*  pts = path.fPathRef->pointsEnd() - 1;
-    const SkScalar* conicWeights = path.fPathRef->conicWeightsEnd();
+    const SkPathVerb* verbs = verbSpan.end();
+    const SkPathVerb* verbsBegin = verbSpan.begin();
+    const SkPoint*  pts = path.points().end() - 1;
+    const SkScalar* conicWeights = path.conicWeights().end();
 
     while (verbs > verbsBegin) {
         SkPathVerb v = *--verbs;
@@ -961,10 +962,15 @@ SkPathBuilder& SkPathBuilder::privateReversePathTo(const SkPath& path) {
 }
 
 SkPathBuilder& SkPathBuilder::privateReverseAddPath(const SkPath& src) {
-    const SkPathVerb* verbsBegin = src.fPathRef->verbsBegin();
-    const SkPathVerb* verbs = src.fPathRef->verbsEnd();
-    const SkPoint* pts = src.fPathRef->pointsEnd();
-    const SkScalar* conicWeights = src.fPathRef->conicWeightsEnd();
+    auto verbSpan = src.verbs();
+    if (verbSpan.empty()) {
+        return *this;
+    }
+
+    const SkPathVerb* verbs = verbSpan.end();
+    const SkPathVerb* verbsBegin = verbSpan.begin();
+    const SkPoint*  pts = src.points().end();
+    const SkScalar* conicWeights = src.conicWeights().end();
 
     bool needMove = true;
     bool needClose = false;
@@ -1097,6 +1103,13 @@ SkPathBuilder& SkPathBuilder::transform(const SkMatrix& matrix) {
     return *this;
 }
 
+std::optional<SkRect> SkPathBuilder::computeTightBounds() const {
+    if (!this->isFinite()) {
+        return {};
+    }
+    return SkPathPriv::ComputeTightBounds(this->points(), this->verbs(), this->conicWeights());
+}
+
 bool SkPathBuilder::isFinite() const {
     for (auto p : fPts) {
         if (!p.isFinite()) {
@@ -1119,4 +1132,9 @@ bool SkPathBuilder::isZeroLengthSincePoint(int startPtIndex) const {
         }
     }
     return true;
+}
+
+bool SkPathBuilder::contains(SkPoint p) const {
+    const auto raw = SkPathPriv::Raw(*this, SkResolveConvexity::kNo);
+    return raw.has_value() && SkPathPriv::Contains(*raw, p);
 }
