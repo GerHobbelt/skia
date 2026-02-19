@@ -15,6 +15,7 @@ namespace {
 
 // AGTM tone mapping shader.
 static constexpr char gAgtmSKSL[] =
+    "uniform half scale_factor;"       // The scale to apply in linear space
     "uniform shader curve_xym;"        // The texture containing control points.
     "uniform half weight_i;"           // The weight of gain curve "i"
     "uniform half4 mix_rgbx_i;"        // The red,green,blue mixing coefficients.
@@ -98,6 +99,7 @@ static constexpr char gAgtmSKSL[] =
 
      // Shader equivalent of AgtmHelpers::ApplyGain.
     "half4 main(half4 color) {"
+      "color.rgb *= scale_factor;"
       "if (weight_i > 0.0) {"
          // Unpremultiply alpha is needed.
         "float a_inv = (color.a == 0.0) ? 1.0 : 1.0 / color.a;"
@@ -128,8 +130,6 @@ static sk_sp<SkRuntimeEffect> agtm_runtime_effect() {
 }  // namespace
 
 namespace skhdr {
-
-AdaptiveGlobalToneMap::HeadroomAdaptiveToneMap::HeadroomAdaptiveToneMap() = default;
 
 SkColor4f AgtmHelpers::EvaluateComponentMixingFunction(
         const AdaptiveGlobalToneMap::ComponentMixingFunction& mix, const SkColor4f& c) {
@@ -506,14 +506,15 @@ sk_sp<SkColorFilter> AgtmImpl::makeColorFilter(float targetedHdrHeadroom) const 
     if (!hatm.has_value()) {
         return nullptr;
     }
-    return AgtmHelpers::MakeColorFilter(hatm.value(), targetedHdrHeadroom);
+    return AgtmHelpers::MakeColorFilter(hatm.value(), targetedHdrHeadroom, 1.f);
 }
 
 namespace AgtmHelpers {
 
 sk_sp<SkColorFilter> MakeColorFilter(
         const AdaptiveGlobalToneMap::HeadroomAdaptiveToneMap& hatm,
-        float targetedHdrHeadroom) {
+        float targetedHdrHeadroom,
+        float scaleFactor) {
     const auto weighting = ComputeWeighting(hatm, targetedHdrHeadroom);
 
     auto effect = agtm_runtime_effect();
@@ -521,6 +522,7 @@ sk_sp<SkColorFilter> MakeColorFilter(
         return nullptr;
     }
     SkRuntimeShaderBuilder builder(effect);
+    builder.uniform("scale_factor") = scaleFactor;
     for (size_t a = 0; a < 2; ++a) {
         const char* weight_str[2] = {"weight_i", "weight_j"};
         builder.uniform(weight_str[a]) = weighting.fWeight[a];
@@ -570,11 +572,82 @@ sk_sp<SkColorFilter> MakeColorFilter(
     return filter->makeWithWorkingColorSpace(gainApplicationColorSpace);
 }
 
+// Return the maximum luminance from CLLI, MDCV, or a default.
+static float get_max_luminance(const Metadata& metadata) {
+    if (metadata.getContentLightLevelInformation(nullptr)) {
+        ContentLightLevelInformation clli;
+        if (metadata.getContentLightLevelInformation(&clli) && clli.fMaxCLL > 0.f) {
+            return clli.fMaxCLL;
+        }
+    }
+    if (metadata.getMasteringDisplayColorVolume(nullptr)) {
+        MasteringDisplayColorVolume mdcv;
+        if (metadata.getMasteringDisplayColorVolume(&mdcv) &&
+            mdcv.fMaximumDisplayMasteringLuminance > 0.f) {
+            return mdcv.fMaximumDisplayMasteringLuminance;
+        }
+    }
+    return 1000.f;
+}
+
 bool PopulateToneMapAgtmParams(const Metadata& metadata,
                                const SkColorSpace* inputColorSpace,
-                               AdaptiveGlobalToneMap* outAgtm) {
-    // TODO(https://crbug.com/395659818): Add scaling and default tone mapping for HLG and PQ.
-    return metadata.getAdaptiveGlobalToneMap(outAgtm);
+                               AdaptiveGlobalToneMap* outAgtm,
+                               float* outScaleFactor) {
+    // If `inputColorSpace` is HLG or PQ, find the HDR reference white value. When the shader
+    // starts, this is the luminance that will have been mapped to 1.0. We will populate
+    // `outScaleFactor` with a scale such that the AGTM HDR reference white luminance (if specified
+    // will be mapped to 1.0).
+    bool inputIsPqOrHlg = false;
+    float inputPqOrHlgWhite = AdaptiveGlobalToneMap::kDefaultHdrReferenceWhite;
+    if (inputColorSpace) {
+        skcms_TransferFunction trfn;
+        inputColorSpace->transferFn(&trfn);
+        switch (skcms_TransferFunction_getType(&trfn)) {
+            case skcms_TFType_PQ:
+            case skcms_TFType_HLG:
+                inputIsPqOrHlg = true;
+                inputPqOrHlgWhite = trfn.a;
+                break;
+            default:
+                break;
+        }
+    }
+
+    AdaptiveGlobalToneMap agtm;
+    auto& hatm = agtm.fHeadroomAdaptiveToneMap;
+    bool hadAgtmMetadata = metadata.getAdaptiveGlobalToneMap(&agtm);
+
+    // SDR content that does not specify an inverse tone mapping will not have a default tone
+    // mapping added.
+    if (!inputIsPqOrHlg) {
+        if (!hadAgtmMetadata || !hatm.has_value()) {
+            return false;
+        }
+    }
+
+    // If no AGTM was specified, populate the HDR reference white from the input color space.
+    if (!hadAgtmMetadata) {
+        agtm.fHdrReferenceWhite = inputPqOrHlgWhite;
+    }
+
+    // If no tone mapping was specified, then use RWTMO with the baseline HDR headroom computed
+    // from the CLLI and MDCV metadata.
+    if (!hatm.has_value()) {
+        hatm = {{
+            .fBaselineHdrHeadroom = std::log2(
+                std::max(get_max_luminance(metadata) / agtm.fHdrReferenceWhite, 1.f))
+        }};
+        AgtmHelpers::PopulateUsingRwtmo(hatm.value());
+    }
+
+    if (outAgtm) {
+        *outAgtm = agtm;
+    }
+    if (outScaleFactor) {
+        *outScaleFactor = inputIsPqOrHlg ? inputPqOrHlgWhite / agtm.fHdrReferenceWhite : 1.f;
+    }
+    return true;
 }
 
 }  // namespace AgtmHelpers
@@ -624,10 +697,13 @@ std::unique_ptr<Agtm> Agtm::Make(const SkData* data) {
 std::unique_ptr<Agtm> Agtm::MakeReferenceWhite(float hdrReferenceWhite, float baselineHdrHeadroom) {
     SkASSERT(baselineHdrHeadroom >= 0.f);
     auto result = std::make_unique<AgtmImpl>();
-    result->fMetadata.fHdrReferenceWhite = hdrReferenceWhite;
-    auto& hatm = result->fMetadata.fHeadroomAdaptiveToneMap.emplace();
-    hatm.fBaselineHdrHeadroom = baselineHdrHeadroom;
-    AgtmHelpers::PopulateUsingRwtmo(hatm);
+    result->fMetadata = {
+        .fHdrReferenceWhite = hdrReferenceWhite,
+        .fHeadroomAdaptiveToneMap = {{
+            .fBaselineHdrHeadroom = baselineHdrHeadroom,
+        }},
+    };
+    AgtmHelpers::PopulateUsingRwtmo(result->fMetadata.fHeadroomAdaptiveToneMap.value());
     return result;
 }
 
@@ -635,10 +711,14 @@ std::unique_ptr<Agtm> Agtm::MakeReferenceWhite(float hdrReferenceWhite, float ba
 std::unique_ptr<Agtm> Agtm::MakeClamp(float hdrReferenceWhite, float baselineHdrHeadroom) {
     SkASSERT(baselineHdrHeadroom >= 0.f);
     auto result = std::make_unique<AgtmImpl>();
-    result->fMetadata.fHdrReferenceWhite = hdrReferenceWhite;
-    auto& hatm = result->fMetadata.fHeadroomAdaptiveToneMap.emplace();
-    hatm.fBaselineHdrHeadroom = baselineHdrHeadroom;
-    hatm.fGainApplicationSpacePrimaries = SkNamedPrimaries::kRec2020;
+    result->fMetadata = {
+        .fHdrReferenceWhite = hdrReferenceWhite,
+        .fHeadroomAdaptiveToneMap = {{
+            .fBaselineHdrHeadroom = baselineHdrHeadroom,
+            .fGainApplicationSpacePrimaries = SkNamedPrimaries::kRec2020,
+            .fAlternateImages = {},
+        }},
+    };
     return result;
 }
 
