@@ -32,6 +32,7 @@
 #include "src/gpu/graphite/RecorderPriv.h"
 #include "src/gpu/graphite/RenderPassDesc.h"
 #include "src/gpu/graphite/ResourceTypes.h"
+#include "src/gpu/graphite/TextureFormat.h"
 #include "src/gpu/graphite/TextureInfoPriv.h"
 #include "src/gpu/graphite/TextureProxy.h"
 #include "src/gpu/graphite/TextureProxyView.h"
@@ -68,7 +69,8 @@ sk_sp<DrawContext> DrawContext::Make(const Caps* caps,
     if (!caps->isRenderable(target->textureInfo())) {
         return nullptr;
     }
-    if (!caps->areColorTypeAndTextureInfoCompatible(colorInfo.colorType(), target->textureInfo())) {
+    if (!AreColorTypeAndFormatCompatible(colorInfo.colorType(),
+                                         TextureInfoPriv::ViewFormat(target->textureInfo()))) {
         return nullptr;
     }
 
@@ -312,9 +314,9 @@ void DrawContext::flush(Recorder* recorder) {
                 this->colorInfo().colorType(), TextureInfoPriv::ViewFormat(fTarget->textureInfo()));
         if (!writeSwizzle.has_value()) {
             writeSwizzle = Swizzle::RGBA(); // Fall back to rgba in release builds
-            SkDEBUGFAILF("No valid write swizzle for color type %d with format %s",
-                         (int) this->colorInfo().colorType(),
-                         TextureFormatName(TextureInfoPriv::ViewFormat(fTarget->textureInfo())));
+            SKGPU_LOG_W("No valid write swizzle for color type %d with format %s",
+                        (int) this->colorInfo().colorType(),
+                        TextureFormatName(TextureInfoPriv::ViewFormat(fTarget->textureInfo())));
         }
         RenderPassDesc desc = RenderPassDesc::Make(caps, fTarget->textureInfo(), loadOp, storeOp,
                                                    dsFlags,
