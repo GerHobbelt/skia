@@ -58,8 +58,8 @@ private:
     wgpu::Buffer fBuffer;
     skia_private::STArray<1, AutoCallback> fAsyncMapCallbacks;
 
-    // Ensure that only one thread can call asyncMap().
-    [[maybe_unused]] SingleOwner fSingleMapCaller;
+    // Ensure that only one thread can access fAsyncMapCallbacks.
+    [[maybe_unused]] SingleOwner fSingleAsyncMapCallbacksOwner;
 };
 
 } // namespace skgpu::graphite

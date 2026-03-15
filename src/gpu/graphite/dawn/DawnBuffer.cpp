@@ -223,9 +223,8 @@ void DawnBuffer::onAsyncMap(GpuFinishedProc proc, GpuFinishedContext ctx) {
     // This function is only useful for Emscripten where we have to use asyncMap().
     SkASSERT(this->sharedContext()->caps()->bufferMapsAreAsync());
 
-    SKGPU_ASSERT_SINGLE_OWNER(&fSingleMapCaller)
-
     if (proc) {
+        SKGPU_ASSERT_SINGLE_OWNER(&fSingleAsyncMapCallbacksOwner)
         if (this->isMapped()) {
             proc(ctx, CallbackResult::kSuccess);
             return;
@@ -280,7 +279,7 @@ void DawnBuffer::onUnmap() {
 
 template <typename StatusT, typename MessageT>
 void DawnBuffer::mapCallback(StatusT status, MessageT message) {
-    SKGPU_ASSERT_SINGLE_OWNER(&fSingleMapCaller)
+    SKGPU_ASSERT_SINGLE_OWNER(&fSingleAsyncMapCallbacksOwner)
 
     if (is_map_succeeded(status)) {
         if (this->fBuffer.GetUsage() & wgpu::BufferUsage::MapWrite) {

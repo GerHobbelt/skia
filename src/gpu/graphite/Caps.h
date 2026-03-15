@@ -234,13 +234,6 @@ public:
      */
     skgpu::Swizzle getWriteSwizzle(SkColorType, const TextureInfo&) const;
 
-    /**
-     * Checks whether the passed color type is renderable. If so, the same color type is passed
-     * back. If not, provides an alternative (perhaps lower bit depth and/or unorm instead of float)
-     * color type that is supported or kUnknown if there no renderable fallback format.
-     */
-    SkColorType getRenderableColorType(SkColorType) const;
-
     int maxTextureSize() const { return fMaxTextureSize; }
 
     virtual void buildKeyForTexture(SkISize dimensions,
@@ -572,7 +565,7 @@ private:
     // approach to textures and color types.
     const ColorTypeInfo* getColorTypeInfo(SkColorType, const TextureInfo&) const;
     virtual SkSpan<const ColorTypeInfo> getColorTypeInfos(const TextureInfo&) const = 0;
-    virtual TextureFormat getFormatForColorType(SkColorType) const = 0;
+    virtual TextureFormat getFormatForColorType(SkColorType, Renderable) const = 0;
 
     // Return a TextureInfo that is configured to support the given usages with the requested format
     // and other properties. This is only called if getTextureSupport() matches for kOptimal tiling.

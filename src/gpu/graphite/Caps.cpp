@@ -255,7 +255,7 @@ TextureInfo Caps::getDefaultSampledTextureInfo(SkColorType colorType,
     }
 
     return this->getDefaultTextureInfo(usage,
-                                       this->getFormatForColorType(colorType),
+                                       this->getFormatForColorType(colorType, renderable),
                                        SampleCount::k1,
                                        mipmapped,
                                        isProtected,
@@ -289,7 +289,7 @@ TextureInfo Caps::getDefaultStorageTextureInfo(SkColorType colorType) const {
     return this->getDefaultTextureInfo(TextureUsage::kStorage |
                                        TextureUsage::kSample |
                                        TextureUsage::kCopySrc,
-                                       this->getFormatForColorType(colorType),
+                                       this->getFormatForColorType(colorType, Renderable::kNo),
                                        SampleCount::k1,
                                        Mipmapped::kNo,
                                        Protected::kNo,
@@ -301,30 +301,6 @@ bool Caps::areColorTypeAndTextureInfoCompatible(SkColorType ct, const TextureInf
     // (can be handled by setting up the colorTypeInfo instead?)
 
     return SkToBool(this->getColorTypeInfo(ct, info));
-}
-
-static inline SkColorType color_type_fallback(SkColorType ct) {
-    switch (ct) {
-        // kRGBA_8888 is our default fallback for many color types that may not have renderable
-        // backend formats.
-        case kAlpha_8_SkColorType:
-        case kRGB_565_SkColorType:
-        case kARGB_4444_SkColorType:
-        case kBGRA_8888_SkColorType:
-        case kRGBA_1010102_SkColorType:
-        case kBGRA_1010102_SkColorType:
-        case kRGBA_F16_SkColorType:
-        case kRGBA_F16Norm_SkColorType:
-            return kRGBA_8888_SkColorType;
-        case kA16_float_SkColorType:
-            return kRGBA_F16_SkColorType;
-        case kGray_8_SkColorType:
-        case kRGB_F16F16F16x_SkColorType:
-        case kRGB_101010x_SkColorType:
-            return kRGB_888x_SkColorType;
-        default:
-            return kUnknown_SkColorType;
-    }
 }
 
 const Caps::ColorTypeInfo* Caps::getColorTypeInfo(SkColorType ct, const TextureInfo& info) const {
@@ -351,21 +327,6 @@ SkColorType Caps::getDefaultColorType(const TextureInfo& info) const {
             return colorInfo.fColorType;
         }
     }
-    return kUnknown_SkColorType;
-}
-
-SkColorType Caps::getRenderableColorType(SkColorType ct) const {
-    do {
-        auto texInfo = this->getDefaultSampledTextureInfo(ct,
-                                                          Mipmapped::kNo,
-                                                          Protected::kNo,
-                                                          Renderable::kYes);
-        // We continue to the fallback color type if there is no default renderable format
-        if (texInfo.isValid() && this->isRenderable(texInfo)) {
-            return ct;
-        }
-        ct = color_type_fallback(ct);
-    } while (ct != kUnknown_SkColorType);
     return kUnknown_SkColorType;
 }
 
