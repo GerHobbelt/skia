@@ -23,10 +23,11 @@ if (skia_use_system_harfbuzz) {
     _src = "../externals/harfbuzz/src"
     public_include_dirs = [
       ".",
+      "../externals/freetype/include",
       _src,
     ]
     defines = [
-      #"HAVE_FREETYPE",
+      "HAVE_FREETYPE",
       #"HAVE_ICU",
       #"HAVE_ICU_BUILTIN",
       "HAVE_OT",
