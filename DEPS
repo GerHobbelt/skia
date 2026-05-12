@@ -45,6 +45,24 @@ deps = {
   "third_party/externals/wuffs"                  : "https://skia.googlesource.com/external/github.com/google/wuffs-mirror-release-c.git@e3f919ccfe3ef542cfc983a82146070258fb57f8",
   "third_party/externals/zlib"                   : "https://chromium.googlesource.com/chromium/src/third_party/zlib@646b7f569718921d7d4b5b8e22572ff6c76f2596",
 
+  # Dawn + transitive deps required by third_party/dawn/build_dawn.py when
+  # skia_use_dawn=true. Versions track infra/bots/deps/deps_gen.go for m148.
+  # Skia's git-sync-deps doesn't support gclient-style 'condition' gating, so
+  # non-graphite users also pay the (shallow) clone cost for these repos.
+  "third_party/externals/dawn"                    : "https://dawn.googlesource.com/dawn.git@d641a1d08b2048314c6e245b66614f6deb4aacc7",
+  "third_party/externals/abseil-cpp"              : "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git@2a7d49fc392cad55159d68d98aa3648bc89795d3",
+  "third_party/externals/jinja2"                  : "https://chromium.googlesource.com/chromium/src/third_party/jinja2.git@c3027d884967773057bf74b957e3fea87e5df4d7",
+  "third_party/externals/markupsafe"              : "https://chromium.googlesource.com/chromium/src/third_party/markupsafe.git@4256084ae14175d38a3ff7d739dca83ae49ccec6",
+  "third_party/externals/glslang"                 : "https://chromium.googlesource.com/external/github.com/KhronosGroup/glslang.git@1d47ffa8ac4374a19b302021e216a20f22a3de92",
+  "third_party/externals/vulkan-headers"          : "https://chromium.googlesource.com/external/github.com/KhronosGroup/Vulkan-Headers.git@afe9eb980aa928a66d1c9c06f38c55dd59868720",
+  "third_party/externals/vulkan-utility-libraries": "https://chromium.googlesource.com/external/github.com/KhronosGroup/Vulkan-Utility-Libraries.git@48b1fd1a65e436bae806cb6180c9338846b9de97",
+  "third_party/externals/webgpu-headers"          : "https://chromium.googlesource.com/external/github.com/webgpu-native/webgpu-headers.git@706853a9da45b8e89b7ea005aa267294d115f8ce",
+  "third_party/externals/egl-registry"            : "https://skia.googlesource.com/external/github.com/KhronosGroup/EGL-Registry.git@b055c9b483e70ecd57b3cf7204db21f5a06f9ffe",
+  "third_party/externals/opengl-registry"         : "https://skia.googlesource.com/external/github.com/KhronosGroup/OpenGL-Registry.git@14b80ebeab022b2c78f84a573f01028c96075553",
+  "third_party/externals/spirv-headers"           : "https://skia.googlesource.com/external/github.com/KhronosGroup/SPIRV-Headers.git@6dd7ba990830f7c15ac1345ff3b43ef6ffdad216",
+  "third_party/externals/spirv-tools"             : "https://skia.googlesource.com/external/github.com/KhronosGroup/SPIRV-Tools.git@2d14d2e76aa7de72404b17078eda15c20a6a0389",
+  "third_party/externals/swiftshader"             : "https://swiftshader.googlesource.com/SwiftShader.git@89556131bf9d48af3c5c9fbb9a3322e706da89a3",
+
   'bin': {
     'packages': [
       {
