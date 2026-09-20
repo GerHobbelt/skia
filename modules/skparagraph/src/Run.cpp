@@ -366,13 +366,14 @@ bool Cluster::isSoftBreak() const {
 }
 
 bool Cluster::isSoftHyphen() const {
-    // U+00AD is encoded as 0xC2 0xAD in UTF-8
     auto text = fOwner->text();
-    if (fTextRange.width() == 2) {
-        return (uint8_t)text[fTextRange.start] == 0xC2 &&
-               (uint8_t)text[fTextRange.start + 1] == 0xAD;
+    const char* p = text.begin() + fTextRange.start;
+    const char* end = text.begin() + fTextRange.end;
+    if (p >= end) {
+        return false;
     }
-    return false;
+    SkUnichar cp = SkUTF::NextUTF8(&p, end);
+    return cp == 0x00AD && p == end;
 }
 
 bool Cluster::isGraphemeBreak() const {

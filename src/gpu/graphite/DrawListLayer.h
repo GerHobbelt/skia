@@ -86,13 +86,13 @@ private:
                         const UniformDataCache::Index& uniformIndex,
                         const LayerKey& key,
                         const DrawParams* drawParams,
-                        const Insertion& start);
+                        Insertion& start);
 
     friend class DrawPass;
 
     // It turns out that these seem to be really good default parameters. Maybe the default
     // allocation could be brough down a little bit.
-    static constexpr uint32_t kMaxSearchLimit = 32;
+    static constexpr int32_t  kMaxSearchLimit = 32;
     static constexpr uint32_t kDefaultAllocation = 4096;
 
     // TODO (thomsmit): Try using SkSTArenaAllocWithReset that has the first storage block stored
@@ -102,9 +102,6 @@ private:
 
     int fDrawCount = 0;
     CompressedPaintersOrder fOrderCounter = CompressedPaintersOrder::First();
-    Layer* fStencilLayer = nullptr;
-    BindingWrapper* fStencilWrapper = nullptr;
-    StencilDraws* fStencilList = nullptr;
 };
 
 } // namespace skgpu::graphite

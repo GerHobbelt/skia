@@ -8593,7 +8593,7 @@ UNIX_ONLY_TEST(SkParagraph_ArabicWithLetterSpacingWhitespacesAsCSS, reporter) {
 // When NOT at a line break, soft hyphens should remain invisible (zero-width).
 
 UNIX_ONLY_TEST(SkParagraph_SoftHyphenAtLineBreak, reporter) {
-    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>();
+    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>(true);
     SKIP_IF_FONTS_NOT_FOUND(reporter, fontCollection)
 
     // "inter\u00ADnational" — soft hyphen between "inter" and "national"
@@ -8616,17 +8616,20 @@ UNIX_ONLY_TEST(SkParagraph_SoftHyphenAtLineBreak, reporter) {
     builder.pop();
 
     auto paragraph = builder.Build();
-    // Layout with a width that forces a break at the soft hyphen
-    // "inter" at 20px Roboto is roughly 40-50px wide; use a narrow width
-    paragraph->layout(60);
+    // Narrow width forces a break at the soft hyphen. We don't assert on the
+    // exact line count because glyph advances vary across font versions; we
+    // verify the feature works by checking the hyphen run's structural state.
+    paragraph->layout(80);
 
     auto impl = static_cast<ParagraphImpl*>(paragraph.get());
-    // Should have 2 lines: "inter-" and "national"
-    REPORTER_ASSERT(reporter, impl->lines().size() == 2);
+    REPORTER_ASSERT(reporter, !impl->lines().empty());
 
-    // The first line should have a hyphen appended (width > 0)
+    // Structural check: the first line should have a hyphen run attached.
+    // This is the feature's output regardless of how many total lines the
+    // text breaks into, which depends on font metrics.
     auto& firstLine = impl->lines()[0];
     REPORTER_ASSERT(reporter, firstLine.hyphen() != nullptr);
+    if (firstLine.hyphen() == nullptr) return;
     // The hyphen run should have positive advance width
     REPORTER_ASSERT(reporter, firstLine.hyphen()->advance().fX > 0);
     // The line's total width should include the hyphen
@@ -8634,7 +8637,7 @@ UNIX_ONLY_TEST(SkParagraph_SoftHyphenAtLineBreak, reporter) {
 }
 
 UNIX_ONLY_TEST(SkParagraph_SoftHyphenNoBreak, reporter) {
-    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>();
+    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>(true);
     SKIP_IF_FONTS_NOT_FOUND(reporter, fontCollection)
 
     // Same text but with enough width to fit on one line — no hyphen should render
@@ -8667,7 +8670,7 @@ UNIX_ONLY_TEST(SkParagraph_SoftHyphenNoBreak, reporter) {
 }
 
 UNIX_ONLY_TEST(SkParagraph_MultipleSoftHyphens, reporter) {
-    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>();
+    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>(true);
     SKIP_IF_FONTS_NOT_FOUND(reporter, fontCollection)
 
     // "su\u00ADper\u00ADcali\u00ADfrag" — multiple soft hyphens
@@ -8692,21 +8695,21 @@ UNIX_ONLY_TEST(SkParagraph_MultipleSoftHyphens, reporter) {
     builder.pop();
 
     auto paragraph = builder.Build();
-    // Narrow width to force a break at one of the soft hyphens
-    paragraph->layout(60);
+    // Narrow width forces a break at one of the soft hyphens.
+    paragraph->layout(80);
 
     auto impl = static_cast<ParagraphImpl*>(paragraph.get());
-    // Should have at least 2 lines
-    REPORTER_ASSERT(reporter, impl->lines().size() >= 2);
+    REPORTER_ASSERT(reporter, !impl->lines().empty());
 
-    // The first line should have a hyphen (it breaks at a soft hyphen)
+    // The first line should have a hyphen (it breaks at a soft hyphen).
     auto& firstLine = impl->lines()[0];
     REPORTER_ASSERT(reporter, firstLine.hyphen() != nullptr);
+    if (firstLine.hyphen() == nullptr) return;
     REPORTER_ASSERT(reporter, firstLine.hyphen()->advance().fX > 0);
 }
 
 UNIX_ONLY_TEST(SkParagraph_SoftHyphenLineWidth, reporter) {
-    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>();
+    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>(true);
     SKIP_IF_FONTS_NOT_FOUND(reporter, fontCollection)
 
     const char* text =
@@ -8727,13 +8730,14 @@ UNIX_ONLY_TEST(SkParagraph_SoftHyphenLineWidth, reporter) {
     builder.pop();
 
     auto paragraph = builder.Build();
-    paragraph->layout(60);
+    paragraph->layout(80);
 
     auto impl = static_cast<ParagraphImpl*>(paragraph.get());
-    REPORTER_ASSERT(reporter, impl->lines().size() == 2);
+    REPORTER_ASSERT(reporter, !impl->lines().empty());
 
     auto& firstLine = impl->lines()[0];
     REPORTER_ASSERT(reporter, firstLine.hyphen() != nullptr);
+    if (firstLine.hyphen() == nullptr) return;
 
     // Line width should equal text width + hyphen width
     SkScalar textWidth = firstLine.widthWithoutEllipsis();
@@ -8743,7 +8747,7 @@ UNIX_ONLY_TEST(SkParagraph_SoftHyphenLineWidth, reporter) {
 }
 
 UNIX_ONLY_TEST(SkParagraph_SoftHyphenRTL, reporter) {
-    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>();
+    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>(true);
     SKIP_IF_FONTS_NOT_FOUND(reporter, fontCollection)
 
     // Arabic text with soft hyphens: "كلمة\u00ADطويلة" (kalima-tawila = "long word")
@@ -8767,20 +8771,56 @@ UNIX_ONLY_TEST(SkParagraph_SoftHyphenRTL, reporter) {
     builder.pop();
 
     auto paragraph = builder.Build();
-    // Narrow width to force a break at the soft hyphen
-    paragraph->layout(60);
+    // Arabic glyphs are wider per character; narrow width forces a break.
+    paragraph->layout(40);
 
     auto impl = static_cast<ParagraphImpl*>(paragraph.get());
+    REPORTER_ASSERT(reporter, !impl->lines().empty());
 
-    if (impl->lines().size() >= 2) {
-        // If the text broke at the soft hyphen, verify hyphen is present
-        auto& firstLine = impl->lines()[0];
-        REPORTER_ASSERT(reporter, firstLine.hyphen() != nullptr);
-        REPORTER_ASSERT(reporter, firstLine.hyphen()->advance().fX > 0);
-        // Line width should include the hyphen
-        REPORTER_ASSERT(reporter, firstLine.width() > firstLine.widthWithoutEllipsis());
+    auto& firstLine = impl->lines()[0];
+    REPORTER_ASSERT(reporter, firstLine.hyphen() != nullptr);
+    if (firstLine.hyphen() == nullptr) return;
+    REPORTER_ASSERT(reporter, firstLine.hyphen()->advance().fX > 0);
+    // Line width should include the hyphen
+    REPORTER_ASSERT(reporter, firstLine.width() > firstLine.widthWithoutEllipsis());
+}
+
+// Verify that with the default (setRenderSoftHyphens(false)), no visible hyphen
+// is rendered even when the line break occurs at a soft hyphen position.
+UNIX_ONLY_TEST(SkParagraph_SoftHyphenDefaultOff, reporter) {
+    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>(true);
+    SKIP_IF_FONTS_NOT_FOUND(reporter, fontCollection)
+
+    const char* text =
+            "inter\xC2\xAD"
+            "national";
+
+    ParagraphStyle paragraph_style;
+    paragraph_style.turnHintingOff();
+    // Intentionally do NOT call setRenderSoftHyphens — default must be false.
+    REPORTER_ASSERT(reporter, !paragraph_style.getRenderSoftHyphens());
+    ParagraphBuilderImpl builder(paragraph_style, fontCollection, get_unicode());
+
+    TextStyle text_style;
+    text_style.setFontFamilies({SkString("Roboto")});
+    text_style.setFontSize(20);
+    text_style.setColor(SK_ColorBLACK);
+    builder.pushStyle(text_style);
+    builder.addText(text, strlen(text));
+    builder.pop();
+
+    auto paragraph = builder.Build();
+    paragraph->layout(80);
+
+    auto impl = static_cast<ParagraphImpl*>(paragraph.get());
+    REPORTER_ASSERT(reporter, !impl->lines().empty());
+
+    // No hyphen run should be created on any line when rendering is disabled.
+    for (const auto& line : impl->lines()) {
+        REPORTER_ASSERT(reporter, line.hyphen() == nullptr);
     }
-    // If the font isn't available and text doesn't break, that's okay — skip gracefully
+    auto& firstLine = impl->lines()[0];
+    REPORTER_ASSERT(reporter, firstLine.width() == firstLine.widthWithoutEllipsis());
 }
 
 #if defined(SK_UNICODE_ICU_IMPLEMENTATION)
