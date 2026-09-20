@@ -91,7 +91,7 @@ alias(
 
 alias(
     name = "ganesh_vulkan",
-    actual = "//src/gpu/ganesh/vk:ganesh_vulkan_novma",
+    actual = "//src/gpu/ganesh/vk:ganesh_vulkan",
     visibility = ["//visibility:public"],
 )
 
@@ -120,6 +120,12 @@ alias(
 alias(
     name = "bmp_decode_codec",
     actual = "//src/codec:bmp_decode",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "bmp_decode_rust",
+    actual = "//src/codec:rust_bmp_decoder",
     visibility = ["//visibility:public"],
 )
 

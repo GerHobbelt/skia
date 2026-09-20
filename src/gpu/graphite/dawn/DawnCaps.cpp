@@ -280,9 +280,8 @@ void DawnCaps::initCaps(const DawnBackendContext& backendContext, const ContextO
 
 #if defined(__EMSCRIPTEN__)
     wgpu::SupportedLimits supportedLimits;
-    // TODO(crbug.com/42241199): Update to use wgpu::Status when webgpu.h in Emscripten is updated.
-    [[maybe_unused]] bool limitsSucceeded = backendContext.fDevice.GetLimits(&supportedLimits);
-    SkASSERT(limitsSucceeded);
+    [[maybe_unused]] wgpu::Status status = backendContext.fDevice.GetLimits(&supportedLimits);
+    SkASSERT(status == wgpu::Status::Success);
     wgpu::Limits& limits = supportedLimits.limits;
 #else
     wgpu::CompatibilityModeLimits compatLimits;
@@ -337,7 +336,7 @@ void DawnCaps::initCaps(const DawnBackendContext& backendContext, const ContextO
             DawnGraphicsPipeline::kIntrinsicUniformBufferIndex;
     fResourceBindingReqs.fCombinedUniformBufferBinding =
             DawnGraphicsPipeline::kCombinedUniformIndex;
-    fResourceBindingReqs.fGradientBufferBinding = DawnGraphicsPipeline::kGradientBufferIndex;
+    fResourceBindingReqs.fStorageBufferBinding = DawnGraphicsPipeline::kStorageBufferIndex;
 
 #if !defined(__EMSCRIPTEN__)
     // We need at least 4 SSBOs for intrinsic, render step, paint & gradient buffers.
@@ -390,6 +389,11 @@ void DawnCaps::initCaps(const DawnBackendContext& backendContext, const ContextO
 
     fSupportsRenderPassRenderArea =
             backendContext.fDevice.HasFeature(wgpu::FeatureName::RenderPassRenderArea);
+
+    if (backendContext.fDevice.HasFeature(wgpu::FeatureName::DawnAllowUndefinedLoadStoreOp)) {
+        fDiscardLoadOp = wgpu::LoadOp::Undefined;
+        fDiscardStoreOp = wgpu::StoreOp::Undefined;
+    }
 #endif
 
     if (!fSupportsPartialLoadResolve &&
