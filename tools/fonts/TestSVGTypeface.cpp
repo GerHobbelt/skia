@@ -30,12 +30,11 @@
 #include "include/core/SkSurface.h"
 #include "include/encode/SkPngEncoder.h"
 #include "include/pathops/SkPathOps.h"
-#include "include/private/base/SkTDArray.h"
-#include "include/private/base/SkTemplates.h"
+#include "include/private/SkTDArray.h"
+#include "include/private/SkTemplates.h"
 #include "include/utils/SkNoDrawCanvas.h"
 #include "modules/svg/include/SkSVGDOM.h"
 #include "modules/svg/include/SkSVGNode.h"
-#include "src/base/SkUtils.h"
 #include "src/core/SkAdvancedTypefaceMetrics.h"
 #include "src/core/SkFontDescriptor.h"
 #include "src/core/SkFontPriv.h"
@@ -46,6 +45,7 @@
 #include "src/core/SkPathPriv.h"
 #include "src/core/SkPointPriv.h"
 #include "src/core/SkScalerContext.h"
+#include "src/core/SkUtils.h"
 #include "src/sfnt/SkOTUtils.h"
 #include "tools/Resources.h"
 
@@ -146,7 +146,7 @@ void TestSVGTypeface::getGlyphToUnicodeMap(SkSpan<SkUnichar> glyphToUnicode) con
 }
 
 std::unique_ptr<SkAdvancedTypefaceMetrics> TestSVGTypeface::onGetAdvancedMetrics() const {
-    std::unique_ptr<SkAdvancedTypefaceMetrics> info(new SkAdvancedTypefaceMetrics);
+    auto info = std::make_unique<SkAdvancedTypefaceMetrics>();
     info->fPostScriptName = fName;
     return info;
 }

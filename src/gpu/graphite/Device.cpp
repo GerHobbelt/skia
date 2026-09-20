@@ -38,12 +38,11 @@
 #include "include/gpu/graphite/Recorder.h"
 #include "include/gpu/graphite/Surface.h"
 #include "include/gpu/graphite/TextureInfo.h"
-#include "include/private/base/SingleOwner.h"
-#include "include/private/base/SkAssert.h"
-#include "include/private/base/SkFloatingPoint.h"
-#include "include/private/base/SkTo.h"
-#include "src/base/SkArenaAlloc.h"
-#include "src/base/SkVx.h"
+#include "include/private/SingleOwner.h"
+#include "include/private/SkAssert.h"
+#include "include/private/SkFloatingPoint.h"
+#include "include/private/SkTo.h"
+#include "src/core/SkArenaAlloc.h"
 #include "src/core/SkBlendModePriv.h"
 #include "src/core/SkBlenderBase.h"
 #include "src/core/SkImageFilterTypes.h"  // IWYU pragma: keep
@@ -55,6 +54,7 @@
 #include "src/core/SkStrikeCache.h"
 #include "src/core/SkTraceEvent.h"
 #include "src/core/SkVerticesPriv.h"
+#include "src/core/SkVx.h"
 #include "src/gpu/BlurUtils.h"
 #include "src/gpu/SkBackingFit.h"
 #include "src/gpu/Swizzle.h"
@@ -72,7 +72,6 @@
 #include "src/gpu/graphite/Image_Base_Graphite.h"
 #include "src/gpu/graphite/Image_Graphite.h"
 #include "src/gpu/graphite/KeyContext.h"
-#include "src/gpu/graphite/Log.h"
 #include "src/gpu/graphite/PaintParams.h"
 #include "src/gpu/graphite/PathAtlas.h"
 #include "src/gpu/graphite/RasterPathAtlas.h"
@@ -1488,7 +1487,7 @@ void Device::drawGeometryWithPathEffect(const Transform& localToDevice,
             dst.setIsVolatile(true);
             geometry.setShape(Shape(dst));
         } else {
-            SKGPU_LOG_W("Path effect failed to apply, drawing original path.");
+            SKIA_LOG_W("Path effect failed to apply, drawing original path.");
         }
 
         // Fallthrough, remaining code assumes the effect has been applied to `geometry` and `style`
@@ -1505,7 +1504,7 @@ void Device::drawGeometry(const Transform& localToDevice,
 
     if (!localToDevice.valid()) {
         // If the transform is not invertible or not finite then drawing isn't well defined.
-        SKGPU_LOG_W("Skipping draw with non-invertible/non-finite transform.");
+        SKIA_LOG_W("Skipping draw with non-invertible/non-finite transform.");
         return;
     }
 
@@ -1520,6 +1519,15 @@ void Device::drawGeometry(const Transform& localToDevice,
         // it causes strokes to render in device space.
         this->drawGeometry(Transform::Identity(), Geometry(Shape(devicePath)), paint, style);
         return;
+    }
+
+    // Currently Graphite ignores the inverted-ness of a shape when it's stroked (since inversion
+    // is part of the "fill" style). This differs from Ganesh and CPU rasterization, which only
+    // ignore inverted-ness for hairlines. Setting the inverted bit here enforces consistent
+    // behavior between Graphite's different path rendering strategies.
+    if (geometry.isShape() && geometry.shape().inverted() &&
+        (style.isHairlineStyle() || style.getStyle() == SkStrokeRec::kStroke_Style)) {
+        geometry.shape().setInverted(false);
     }
 
     ScopedDrawBuilder scopedDrawBuilder(fRecorder);
@@ -1546,7 +1554,7 @@ void Device::drawGeometry(const Transform& localToDevice,
                                                       style,
                                                       clip.transformedShapeBounds());
     if (!renderer && !pathAtlas) {
-        SKGPU_LOG_W("Skipping draw with no supported renderer or PathAtlas.");
+        SKIA_LOG_W("Skipping draw with no supported renderer or PathAtlas.");
         return;
     }
 
@@ -1625,7 +1633,7 @@ void Device::drawGeometry(const Transform& localToDevice,
     auto keyResult = shading.toKey(keyContext);
     if (!keyResult) {
         // Converting the SkPaint to a pipeline and set of uniform values + sampled textures failed.
-        SKGPU_LOG_W("Key context creation failed in Device::drawGeometry, draw dropped!");
+        SKIA_LOG_W("Key context creation failed in Device::drawGeometry, draw dropped!");
         return;
     }
     auto [paintID, dstUsage] = *keyResult;
@@ -1647,17 +1655,10 @@ void Device::drawGeometry(const Transform& localToDevice,
             return;
         } else {
             // This paint does not depend on the destination and covers the entire surface, so
-            // discard everything previously recorded and proceed with the draw. However, if we are
-            // here because of a paint with src-over blending that just happens to be opaque, the
-            // discarded dst can still be accessed. For non-floating point formats, that is fine,
-            // but float formats can have NaNs after a discard that cause blending to fail. To
-            // avoid that scenario, we clear to a known value instead.
-            if (paint.finalBlendMode() == SkBlendMode::kSrcOver &&
-                TextureFormatIsFloatingPoint(format)) {
-                fDC->clear(SkColors::kMagenta); // This color doesn't matter
-            } else {
-                fDC->discard();
-            }
+            // discard everything previously recorded and proceed with the draw. DstUsage::kNone
+            // implies no blending will be enabled for the draw, so discards on floating-point
+            // formats (that could inject NaNs into the dst) will be overwritten correctly.
+            fDC->discard();
             // But then continue to render the flood fill with shading
         }
     }
@@ -1694,7 +1695,7 @@ void Device::drawGeometry(const Transform& localToDevice,
         }
 
         if (!atlasMask) {
-            SKGPU_LOG_E("Failed to add shape to atlas!");
+            SKIA_LOG_E("Failed to add shape to atlas!");
             // TODO(b/285195175): This can happen if the atlas is not large enough or a compatible
             // atlas texture cannot be created. Handle the first case in `chooseRenderer` and make
             // sure that the atlas path renderer is not chosen if the path is larger than the atlas
@@ -1825,7 +1826,7 @@ void Device::drawClipShape(const Transform& localToDevice,
                                              DefaultFillStyle(),
                                              clip.transformedShapeBounds());
     if (!renderer) {
-        SKGPU_LOG_W("Skipping clip with no supported path renderer.");
+        SKIA_LOG_W("Skipping clip with no supported path renderer.");
         return;
     } else if (!fRecorder->priv().caps()->useDrawListLayer() &&
                (renderer->depthStencilFlags() & DepthStencilFlags::kStencil)) {
@@ -1871,7 +1872,7 @@ std::pair<DrawParams*, Insertion> Device::drawClipShapeImmediate(const Transform
                                              DefaultFillStyle(),
                                              clip.transformedShapeBounds());
     if (!renderer) {
-        SKGPU_LOG_W("Skipping clip with no supported path renderer.");
+        SKIA_LOG_W("Skipping clip with no supported path renderer.");
         return {nullptr, {}};
     }
 
@@ -2186,7 +2187,7 @@ void Device::drawSpecial(SkSpecialImage* special,
 
     sk_sp<SkImage> img = special->asImage();
     if (!img || !as_IB(img)->isGraphiteBacked()) {
-        SKGPU_LOG_W("Couldn't get Graphite-backed special image as image");
+        SKIA_LOG_W("Couldn't get Graphite-backed special image as image");
         return;
     }
 
@@ -2225,7 +2226,7 @@ void Device::drawCoverageMask(const SkSpecialImage* mask,
 
     auto maskProxyView = AsView(mask->asImage());
     if (!maskProxyView) {
-        SKGPU_LOG_W("Couldn't get Graphite-backed special image as texture proxy view");
+        SKIA_LOG_W("Couldn't get Graphite-backed special image as texture proxy view");
         return;
     }
 

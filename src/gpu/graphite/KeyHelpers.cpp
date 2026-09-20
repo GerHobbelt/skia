@@ -15,11 +15,12 @@
 #include "include/core/SkScalar.h"
 #include "include/effects/SkRuntimeEffect.h"
 #include "include/gpu/graphite/Surface.h"
-#include "src/base/SkHalf.h"
+#include "include/private/SkLog.h"
 #include "src/core/SkBlendModeBlender.h"
 #include "src/core/SkBlenderBase.h"
 #include "src/core/SkColorSpacePriv.h"
 #include "src/core/SkDebugUtils.h"
+#include "src/core/SkHalf.h"
 #include "src/core/SkRuntimeBlender.h"
 #include "src/core/SkRuntimeEffectPriv.h"
 #include "src/core/SkYUVMath.h"
@@ -42,7 +43,6 @@
 #include "src/gpu/graphite/Image_YUVA_Graphite.h"
 #include "src/gpu/graphite/KeyContext.h"
 #include "src/gpu/graphite/KeyHelpers.h"
-#include "src/gpu/graphite/Log.h"
 #include "src/gpu/graphite/PaintParams.h"
 #include "src/gpu/graphite/PaintParamsKey.h"
 #include "src/gpu/graphite/PipelineData.h"
@@ -408,7 +408,7 @@ void GradientShaderBlocks::AddBlock(const KeyContext& keyContext, const Gradient
 
         if (!hasStorage) {
             keyContext.paintParamsKeyBuilder()->addErrorBlock();
-            SKGPU_LOG_W("Couldn't upload large gradient color stop data");
+            SKIA_LOG_W("Couldn't upload large gradient color stop data");
             return;
         }
     }
@@ -1257,6 +1257,9 @@ void ColorSpaceTransformBlock::AddBlock(const KeyContext& keyContext,
 }
 
 //--------------------------------------------------------------------------------------------------
+
+#if defined(SK_GRAPHITE_USE_LEGACY_RRECT_CLIP_SHADER)
+
 namespace {
 
 void add_analytic_clip_data(const KeyContext& keyContext,
@@ -1305,6 +1308,71 @@ void NonMSAAClipBlock::AddBlock(const KeyContext& keyContext, const NonMSAAClipD
         keyContext.paintParamsKeyBuilder()->addBlock(BuiltInCodeSnippetID::kAnalyticClip);
     }
 }
+
+#else
+
+namespace {
+
+void add_analytic_clip_data(const KeyContext& keyContext, const AnalyticClip& clip) {
+    keyContext.pipelineDataGatherer()->write(clip.fXform);
+    keyContext.pipelineDataGatherer()->write(clip.fBounds);
+
+    SkV4 radiiWithInverse= clip.fRadii + SkV4{1.0f, 1.0f, 1.0f, 1.0f};
+
+    // See sk_analytic_clip comment in SkSL module file.
+    static constexpr SkV4 kIntersectEncode  = {1.f, 1.f, -1.f, 1.f};
+    static constexpr SkV4 kDifferenceEncode = {-1.f, 1.f, 1.f, 1.f};
+    radiiWithInverse = radiiWithInverse * (clip.fInverted ? kIntersectEncode : kDifferenceEncode);
+
+    keyContext.pipelineDataGatherer()->write(radiiWithInverse);
+}
+
+void add_atlas_clip_data(const KeyContext& keyContext, const AtlasClip& atlasClip) {
+    SkASSERT(atlasClip.fAtlasTexture);
+
+    SkISize maskSize = atlasClip.fMaskBounds.size();
+    SkRect texMaskBounds = SkRect::MakeXYWH(atlasClip.fOutPos.x(), atlasClip.fOutPos.y(),
+                                            maskSize.width(), maskSize.height());
+    // Outset bounds to capture some of the padding (necessary for inverse clip)
+    texMaskBounds.outset(0.5f, 0.5f);
+    SkPoint texCoordOffset = SkPoint::Make(atlasClip.fOutPos.x() - atlasClip.fMaskBounds.left(),
+                                           atlasClip.fOutPos.y() - atlasClip.fMaskBounds.top());
+
+    keyContext.pipelineDataGatherer()->write(texMaskBounds);
+    keyContext.pipelineDataGatherer()->write(texCoordOffset);
+    keyContext.pipelineDataGatherer()->write(
+            SkSize::Make(1.f/atlasClip.fAtlasTexture->dimensions().width(),
+                         1.f/atlasClip.fAtlasTexture->dimensions().height()));
+}
+
+}  // anonymous namespace
+
+void AddAnalyticClip(const KeyContext& keyContext, const NonMSAAClip& clip) {
+    SkASSERT(!clip.isEmpty());
+
+    sk_sp<TextureProxy> atlasTexture = clip.fAtlasClip.fAtlasTexture;
+    if (atlasTexture) {
+        BEGIN_WRITE_UNIFORMS(keyContext, BuiltInCodeSnippetID::kAnalyticAndAtlasClip)
+        add_analytic_clip_data(keyContext, clip.fAnalyticClip);
+        add_atlas_clip_data(keyContext, clip.fAtlasClip);
+
+        keyContext.paintParamsKeyBuilder()->beginBlock(BuiltInCodeSnippetID::kAnalyticAndAtlasClip);
+        ImmutableSamplerInfo info =
+                keyContext.caps()->getImmutableSamplerInfo(atlasTexture->textureInfo());
+        SamplerDesc samplerDesc {SkSamplingOptions(SkFilterMode::kNearest, SkMipmapMode::kNone),
+                                 {SkTileMode::kClamp, SkTileMode::kClamp},
+                                 info};
+        keyContext.pipelineDataGatherer()->add(std::move(atlasTexture), samplerDesc);
+
+        keyContext.paintParamsKeyBuilder()->endBlock();
+    } else {
+        BEGIN_WRITE_UNIFORMS(keyContext, BuiltInCodeSnippetID::kAnalyticClip)
+        add_analytic_clip_data(keyContext, clip.fAnalyticClip);
+        keyContext.paintParamsKeyBuilder()->addBlock(BuiltInCodeSnippetID::kAnalyticClip);
+    }
+}
+
+#endif // SK_GRAPHITE_USE_LEGACY_RRECT_CLIP_SHADER
 
 //--------------------------------------------------------------------------------------------------
 
@@ -1646,7 +1714,7 @@ static void add_to_key(const KeyContext& keyContext, const SkTableColorFilter* f
                                                                 filter->bitmap(),
                                                                 "TableColorFilterTexture");
     if (!proxy) {
-        SKGPU_LOG_W("Couldn't create TableColorFilter's table");
+        SKIA_LOG_W("Couldn't create TableColorFilter's table");
 
         // Return the input color as-is.
         keyContext.paintParamsKeyBuilder()->addBlock(BuiltInCodeSnippetID::kPriorOutput);
@@ -1976,7 +2044,7 @@ static void add_image_to_key(const KeyContext& keyContext,
                                                           image,
                                                           sampling);
     if (!imageToDraw) {
-        SKGPU_LOG_W("Couldn't convert SkImage to a Graphite-backed representation");
+        SKIA_LOG_W("Couldn't convert SkImage to a Graphite-backed representation");
         keyContext.paintParamsKeyBuilder()->addErrorBlock();
         return;
     }
@@ -2187,7 +2255,7 @@ static void add_to_key(const KeyContext& keyContext, const SkPerlinNoiseShader* 
                                             "PerlinNoiseNoiseTable");
 
     if (!perm || !noise) {
-        SKGPU_LOG_W("Couldn't create tables for PerlinNoiseShader");
+        SKIA_LOG_W("Couldn't create tables for PerlinNoiseShader");
         keyContext.paintParamsKeyBuilder()->addErrorBlock();
         return;
     }
@@ -2226,7 +2294,7 @@ static void add_to_key(const KeyContext& keyContext,
                                                        caps->maxTextureSize(),
                                                        props);
     if (!info.success) {
-        SKGPU_LOG_W("Couldn't access PictureShaders' Image info");
+        SKIA_LOG_W("Couldn't access PictureShaders' Image info");
         keyContext.paintParamsKeyBuilder()->addErrorBlock();
         return;
     }
@@ -2246,7 +2314,7 @@ static void add_to_key(const KeyContext& keyContext,
                                            SkBackingFit::kExact,
                                            &info.props);
     if (!surface) {
-        SKGPU_LOG_W("Could not create surface to render PictureShader");
+        SKIA_LOG_W("Could not create surface to render PictureShader");
         keyContext.paintParamsKeyBuilder()->addErrorBlock();
         return;
     }
@@ -2256,7 +2324,7 @@ static void add_to_key(const KeyContext& keyContext,
     // into 'surface' would be a child of the current device. While we push all tasks to the root
     // list this works out okay, but will need to be addressed before we move off that system.
     if (!img) {
-        SKGPU_LOG_W("Couldn't create SkImage for PictureShader");
+        SKIA_LOG_W("Couldn't create SkImage for PictureShader");
         keyContext.paintParamsKeyBuilder()->addErrorBlock();
         return;
     }
@@ -2265,7 +2333,7 @@ static void add_to_key(const KeyContext& keyContext,
     sk_sp<SkShader> imgShader = img->makeShader(shader->tileModeX(), shader->tileModeY(),
                                                 SkSamplingOptions(shader->filter()), &shaderLM);
     if (!imgShader) {
-        SKGPU_LOG_W("Couldn't create SkImageShader for PictureShader");
+        SKIA_LOG_W("Couldn't create SkImageShader for PictureShader");
         keyContext.paintParamsKeyBuilder()->addErrorBlock();
         return;
     }
@@ -2295,13 +2363,13 @@ static void add_to_key(const KeyContext& keyContext,
 
 static void add_to_key(const KeyContext& keyContext,
                        const SkTransformShader* shader) {
-    SKGPU_LOG_W("Raster-only SkShader (SkTransformShader) encountered");
+    SKIA_LOG_W("Raster-only SkShader (SkTransformShader) encountered");
     keyContext.paintParamsKeyBuilder()->addErrorBlock();
 }
 
 static void add_to_key(const KeyContext& keyContext,
                        const SkTriColorShader* shader) {
-    SKGPU_LOG_W("Raster-only SkShader (SkTriColorShader) encountered");
+    SKIA_LOG_W("Raster-only SkShader (SkTriColorShader) encountered");
     keyContext.paintParamsKeyBuilder()->addErrorBlock();
 }
 
@@ -2357,7 +2425,7 @@ static SkBitmap create_color_and_offset_bitmap(int numStops,
 
         SkHalf halfE = SkFloatToHalf(exponent);
         if ((int)SkHalfToFloat(halfE) != exponent) {
-            SKGPU_LOG_W("Encoding gradient to f16 failed");
+            SKIA_LOG_W("Encoding gradient to f16 failed");
             return {};
         }
 
@@ -2447,7 +2515,7 @@ static void add_gradient_to_key(const KeyContext& keyContext,
             SkBitmap colorsAndOffsetsBitmap =
                     create_color_and_offset_bitmap(colorCount, colors, positions);
             if (colorsAndOffsetsBitmap.empty()) {
-                SKGPU_LOG_W("Couldn't create GradientShader's color and offset bitmap");
+                SKIA_LOG_W("Couldn't create GradientShader's color and offset bitmap");
                 keyContext.paintParamsKeyBuilder()->addErrorBlock();
                 return;
             }
@@ -2457,7 +2525,7 @@ static void add_gradient_to_key(const KeyContext& keyContext,
         proxy = RecorderPriv::CreateCachedProxy(keyContext.recorder(), shader->cachedBitmap(),
                                                 "GradientTexture");
         if (!proxy) {
-            SKGPU_LOG_W("Couldn't create GradientShader's color and offset bitmap proxy");
+            SKIA_LOG_W("Couldn't create GradientShader's color and offset bitmap proxy");
             keyContext.paintParamsKeyBuilder()->addErrorBlock();
             return;
         }
@@ -2631,7 +2699,7 @@ void AddDitherBlock(const KeyContext& keyContext, SkColorType ct) {
     sk_sp<TextureProxy> proxy = RecorderPriv::CreateCachedProxy(keyContext.recorder(), gLUT,
                                                                 "DitherLUT");
     if (keyContext.recorder() && !proxy) {
-        SKGPU_LOG_W("Couldn't create dither shader's LUT");
+        SKIA_LOG_W("Couldn't create dither shader's LUT");
         keyContext.paintParamsKeyBuilder()->addBlock(BuiltInCodeSnippetID::kPriorOutput);
         return;
     }

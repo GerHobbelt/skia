@@ -85,7 +85,6 @@ GRAPHITE_FILES = [
     "KeyContext.h",
     "KeyHelpers.cpp",
     "KeyHelpers.h",
-    "Log.h",
     "PaintParams.cpp",
     "PaintParams.h",
     "PaintParamsKey.cpp",
@@ -226,7 +225,6 @@ skia_cc_library_with_testutil(
     ],
     deps = [
         "//:core",
-        "//src/base",
         "//src/core:core_priv",
         "//src/gpu",
         "//src/sksl:generated_sksl",

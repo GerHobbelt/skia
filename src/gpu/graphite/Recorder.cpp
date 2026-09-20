@@ -23,6 +23,7 @@
 #include "include/gpu/graphite/ImageProvider.h"
 #include "include/gpu/graphite/Recording.h"
 #include "include/gpu/graphite/TextureInfo.h"
+#include "include/private/SkLog.h"
 #include "src/capture/SkCaptureManager.h"
 #include "src/core/SkMipmap.h"
 #include "src/core/SkTraceEvent.h"
@@ -35,7 +36,6 @@
 #include "src/gpu/graphite/CommandBuffer.h"
 #include "src/gpu/graphite/ContextPriv.h"
 #include "src/gpu/graphite/Device.h"
-#include "src/gpu/graphite/Log.h"
 #include "src/gpu/graphite/PaintParamsKey.h"
 #include "src/gpu/graphite/PipelineData.h"
 #include "src/gpu/graphite/ProxyCache.h"
@@ -280,7 +280,7 @@ SkCanvas* Recorder::makeDeferredCanvas(const SkImageInfo& imageInfo,
                                        const TextureInfo& textureInfo) {
     if (fTargetProxyCanvas) {
         // Require snapping before requesting another canvas.
-        SKGPU_LOG_W("Requested a new deferred canvas before snapping the previous one");
+        SKIA_LOG_W("Requested a new deferred canvas before snapping the previous one");
         return nullptr;
     }
 
@@ -305,11 +305,10 @@ SkCanvas* Recorder::makeCaptureCanvas(SkCanvas* canvas) {
     return nullptr;
 }
 
-SkContentID Recorder::createCaptureBreakpoint(SkSurface* surface) {
+void Recorder::createCaptureBreakpoint(SkSurface* surface) {
    if (fSharedContext->captureManager()) {
-        return fSharedContext->captureManager()->snapPicture(surface);
+        fSharedContext->captureManager()->snapPicture(surface);
     }
-    return SkContentID();
 }
 
 void Recorder::registerDevice(sk_sp<Device> device) {
@@ -355,7 +354,7 @@ BackendTexture Recorder::createBackendTexture(AHardwareBuffer* hardwareBuffer,
                                               SkISize dimensions,
                                               bool fromAndroidWindow) const {
     if (fSharedContext->backend() != BackendApi::kVulkan) {
-        SKGPU_LOG_W("Creating an AHardwareBuffer-backed BackendTexture is only supported with the"
+        SKIA_LOG_W("Creating an AHardwareBuffer-backed BackendTexture is only supported with the"
                     "Vulkan backend.");
         return {};
     }
@@ -415,7 +414,7 @@ bool Recorder::updateBackendTexture(const BackendTexture& backendTex,
     UploadSource uploadSource = UploadSource::Make(
             this->priv().caps(), std::move(view), colorInfo, colorInfo, mipLevels, dimensions);
     if (!uploadSource.isValid()) {
-        SKGPU_LOG_E("Recorder::updateBackendTexture: Could not create UploadSource");
+        SKIA_LOG_E("Recorder::updateBackendTexture: Could not create UploadSource");
         return false;
     }
 
@@ -428,7 +427,7 @@ bool Recorder::updateBackendTexture(const BackendTexture& backendTex,
                                                  uploadSource,
                                                  std::make_unique<ImageUploadContext>());
     if (!upload.isValid()) {
-        SKGPU_LOG_E("Recorder::updateBackendTexture: Could not create UploadInstance");
+        SKIA_LOG_E("Recorder::updateBackendTexture: Could not create UploadInstance");
         return false;
     }
     sk_sp<Task> uploadTask = UploadTask::Make(std::move(upload));
@@ -470,7 +469,7 @@ bool Recorder::updateCompressedBackendTexture(const BackendTexture& backendTex,
     UploadSource uploadSource =
             UploadSource::MakeCompressed(this->priv().caps(), std::move(proxy), data, dataSize);
     if (!uploadSource.isValid()) {
-        SKGPU_LOG_E("Recorder::updateBackendTexture: Could not create compressed UploadSource");
+        SKIA_LOG_E("Recorder::updateBackendTexture: Could not create compressed UploadSource");
         return false;
     }
 
@@ -483,7 +482,7 @@ bool Recorder::updateCompressedBackendTexture(const BackendTexture& backendTex,
                                                  uploadSource,
                                                  std::make_unique<ImageUploadContext>());
     if (!upload.isValid()) {
-        SKGPU_LOG_E("Recorder::updateBackendTexture: Could not create compressed UploadInstance");
+        SKIA_LOG_E("Recorder::updateBackendTexture: Could not create compressed UploadInstance");
         return false;
     }
     sk_sp<Task> uploadTask = UploadTask::Make(std::move(upload));

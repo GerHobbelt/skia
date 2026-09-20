@@ -10,8 +10,8 @@
 
 #include "include/core/SkSpan.h"
 #include "include/core/SkTypes.h"
-#include "include/private/base/SkMacros.h"
-#include "include/private/base/SkTArray.h"
+#include "include/private/SkMacros.h"
+#include "include/private/SkTArray.h"
 #include "src/core/SkChecksum.h"
 #include "src/gpu/graphite/BuiltInCodeSnippetID.h"
 
@@ -132,6 +132,9 @@ public:
     // Encodes a regular length as a negative number, or decodes an encoded negative length into
     // its original length >= 0.
     static int32_t EncodeDataSize(int32_t size) { return -size - 1; }
+
+    // We don't want keys to get that large, so this limit is quite strict.
+    static constexpr int kEmbeddedDataSizeLimit = 16;
 
 private:
     friend class PaintParamsKeyBuilder;   // for the parented-data ctor
