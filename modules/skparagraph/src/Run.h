@@ -1,4 +1,4 @@
-// Copyright 2019 Google LLC.
+// Copyright 2019 Google LLC
 #ifndef Run_DEFINED
 #define Run_DEFINED
 
@@ -315,6 +315,7 @@ public:
     bool isIdeographic() const { return fIsIdeographic; }
 
     bool isSoftBreak() const;
+    bool isSoftHyphen() const;
     bool isGraphemeBreak() const;
     bool canBreakLineAfter() const { return isHardBreak() || isSoftBreak(); }
     size_t startPos() const { return fStart; }

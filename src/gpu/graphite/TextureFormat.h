@@ -19,8 +19,6 @@
 
 enum SkColorType : int;
 
-enum SkColorType : int;
-
 namespace skgpu::graphite {
 
 /**
@@ -122,7 +120,7 @@ SkTextureCompressionType TextureFormatCompressionType(TextureFormat);
 
 TextureFormat CompressionTypeToTextureFormat(SkTextureCompressionType);
 
-size_t TextureFormatBytesPerBlock(TextureFormat);
+int TextureFormatBytesPerBlock(TextureFormat);
 
 // The value is mask of SkColorChannelFlag values.
 uint32_t TextureFormatChannelMask(TextureFormat);
@@ -181,7 +179,7 @@ std::optional<Swizzle> WriteSwizzleForColorType(SkColorType, TextureFormat);
 SkSpan<const TextureFormat> PreferredTextureFormats(SkColorType);
 
 // Extra operations that must be applied to CPU data to make it exactly match the SkColorType
-enum class FormatXferOp {
+enum class FormatXferOp : uint8_t {
     kIdentity  = 0x0, // No extra conversion needed to copy between color type and texture format
     kSwapRB    = 0x1, // No SkColorType matches the channel ordering, so swap RB on read or write
     kDropAlpha = 0x2, // No alpha channel in the format but SkColorType expects it so drop or pad

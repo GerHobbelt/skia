@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Google Inc.
+ * Copyright 2018 Google LLC
  *
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
@@ -564,11 +564,8 @@ bool VulkanTestHelper::init(skiatest::Reporter* reporter) {
     if (!fExtensions->hasExtension(VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME, 1)) {
         return false;
     }
-    if (!fExtensions->hasExtension(VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME, 1)) {
-        return false;
-    }
     if (!fExtensions->hasExtension(VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME, 1)) {
-    //    return false;
+       return false;
     }
 
     ACQUIRE_INST_VK_PROC(GetPhysicalDeviceMemoryProperties2);

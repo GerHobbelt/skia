@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 Google Inc.
+ * Copyright 2019 Google LLC
  *
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
@@ -45,21 +45,6 @@ void SkSharingSerialContext::collectNonTextureImagesFromPicture(
 void SkSharingSerialContext::setDirectContext(GrDirectContext* ctx) {
     fDirectContext = ctx;
 }
-
-// TODO: staging functions, move Android to new implementation
-SkSerialReturnType SkSharingSerialContext::serializeImage(SkImage* img, void* ctx) {
-    // Simply forward to the new implementation
-    return SkSharingContext::serializeImage(img, ctx);
-}
-
-sk_sp<SkImage> SkSharingDeserialContext::deserializeImage(const void *data, size_t length,
-                                                          void *ctx) {
-        if (!data || !length) {
-            return nullptr;
-        }
-        auto skData = SkData::MakeWithCopy(data, length);
-        return SkSharingContext::deserializeImage(std::move(skData), std::nullopt, ctx);
-    }
 
 namespace SkSharingContext {
 

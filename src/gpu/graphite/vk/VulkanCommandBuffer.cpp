@@ -389,7 +389,7 @@ void VulkanCommandBuffer::addSignalSemaphores(size_t numSignalSemaphores,
 
 void VulkanCommandBuffer::prepareSurfaceForStateUpdate(SkSurface* targetSurface,
                                                        const MutableTextureState* newState) {
-    TextureProxy* textureProxy = static_cast<Surface*>(targetSurface)->backingTextureProxy();
+    TextureProxy* textureProxy = static_cast<Surface*>(targetSurface)->target().proxy();
     VulkanTexture* texture = static_cast<VulkanTexture*>(textureProxy->texture());
 
     // Even though internally we use this helper for getting src access flags and stages they
@@ -1789,7 +1789,7 @@ bool VulkanCommandBuffer::onCopyBufferToTexture(const Buffer* buffer,
     const VulkanTexture* dstTexture = static_cast<const VulkanTexture*>(texture);
 
     TextureFormat format = TextureInfoPriv::ViewFormat(dstTexture->textureInfo());
-    size_t bytesPerBlock = TextureFormatBytesPerBlock(format);
+    int bytesPerBlock = TextureFormatBytesPerBlock(format);
     SkISize oneBlockDims = CompressedDimensions(TextureFormatCompressionType(format), {1, 1});
 
     // Set up copy regions.
