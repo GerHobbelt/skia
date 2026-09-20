@@ -1291,6 +1291,7 @@ optional("xps") {
 
 optional("png_decode_common") {
   enabled = skia_use_libpng_decode || skia_use_rust_png_decode
+  public = skia_codec_png_public
   sources = skia_codec_png_base
 }
 
@@ -1454,6 +1455,11 @@ if (skia_use_fontations || skia_use_rust_png_decode ||
       rebase_path("//bazel-bin/rust/png/FFI.rs.cc", root_build_dir) +
           "=rust/png/FFI.rs.cc",
     ]
+    if (skia_use_rust_png_for_android) {
+      bazel_args += [ "--//rust/png:for_android=true" ]
+    } else {
+      bazel_args += [ "--//rust/png:for_android=false" ]
+    }
   }
 
   if (skia_use_rust_bmp_decode) {
@@ -1680,6 +1686,10 @@ config("rust_common_cxx_bridge_public_config") {
 
 optional("rust_common") {
   enabled = skia_use_rust_png_decode || skia_use_rust_png_encode
+  public_defines = []
+  if (skia_use_rust_png_for_android) {
+    public_defines += [ "SK_CODEC_USES_PNG_WITH_RUST_FOR_ANDROID" ]
+  }
   public = skia_rust_common_ffi_cpp_hdrs
   sources = skia_rust_common_ffi_cpp_srcs
   public_configs = [ ":rust_common_cxx_bridge_public_config" ]
@@ -1911,6 +1921,7 @@ skia_component("skia") {
     ":jpeg_encode",
     ":pdf",
     ":pdf_jpeg_helpers",
+    ":png_decode_common",
     ":png_decode_libpng",
     ":png_encode_libpng",
     ":webp_encode",

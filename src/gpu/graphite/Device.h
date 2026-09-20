@@ -17,8 +17,8 @@
 #include "include/core/SkSpan.h"
 #include "include/gpu/graphite/Recorder.h"
 #include "include/private/SkDebug.h"
+#include "include/private/SkEnumBitMask.h"
 #include "src/core/SkDevice.h"
-#include "src/core/SkEnumBitMask.h"
 #include "src/gpu/graphite/ClipStack.h"
 #include "src/gpu/graphite/DrawOrder.h"
 #include "src/gpu/graphite/ResourceTypes.h"
@@ -236,7 +236,7 @@ public:
                               SkCanvas::SrcRectConstraint) override;
     // TODO: Implement these using per-edge AA quads and an inlined image shader program.
     void drawImageLattice(const SkImage*, const SkCanvas::Lattice&,
-                          const SkRect& dst, SkFilterMode, const SkPaint&) override {}
+                          const SkRect& dst, SkFilterMode, const SkPaint&) override;
     void drawAtlas(SkSpan<const SkRSXform>, SkSpan<const SkRect>, SkSpan<const SkColor>,
                    sk_sp<SkBlender>, const SkPaint&) override {}
 

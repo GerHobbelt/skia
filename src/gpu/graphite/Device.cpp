@@ -46,6 +46,7 @@
 #include "src/core/SkBlendModePriv.h"
 #include "src/core/SkBlenderBase.h"
 #include "src/core/SkImageFilterTypes.h"  // IWYU pragma: keep
+#include "src/core/SkLatticeIter.h"
 #include "src/core/SkPaintPriv.h"
 #include "src/core/SkPathPriv.h"
 #include "src/core/SkRRectPriv.h"
@@ -975,6 +976,34 @@ bool Device::drawAsTiledImageRect(SkCanvas* canvas,
     return wasTiled;
 }
 
+void Device::drawImageLattice(const SkImage* image, const SkCanvas::Lattice& lattice,
+                          const SkRect& dst, SkFilterMode filter, const SkPaint& paint) {
+    SkLatticeIter iter = SkLatticeIter(lattice, dst);
+
+    SkRect nextSrc, nextDst;
+    bool nextIsFixedColor = false;
+    SkColor nextFixedColor;
+    while (iter.next(&nextSrc, &nextDst, &nextIsFixedColor, &nextFixedColor)) {
+        // Use non-AA quads to match Ganesh and Raster backends behavior of drawImageLattice.
+        if (nextIsFixedColor) {
+            PaintParams paintParams(paint, SkColor4f::FromColor(nextFixedColor));
+            this->drawGeometry(this->localToDeviceTransform(),
+                               Geometry(EdgeAAQuad(nextDst, EdgeAAQuad::Flags::kNone)),
+                               paintParams,
+                               DefaultFillStyle());
+        } else {
+            SkCanvas::ImageSetEntry entry(sk_ref_sp(image), nextSrc, nextDst,
+                                          /*alpha=*/1.f, SkCanvas::kNone_QuadAAFlags);
+            this->drawEdgeAAImageSet(&entry, 1,
+                                     /*dstClips=*/nullptr,
+                                     /*preViewMatrices=*/nullptr,
+                                     SkSamplingOptions(filter),
+                                     paint,
+                                     SkCanvas::kStrict_SrcRectConstraint);
+        }
+    }
+}
+
 void Device::drawOval(const SkRect& oval, const SkPaint& paint) {
     if (paint.getPathEffect()) {
         // Dashing requires that the oval path starts on the right side and travels clockwise. This
@@ -1784,9 +1813,11 @@ void Device::drawGeometry(const Transform& localToDevice,
             // The regular draw has analytic coverage, so isn't being sorted front to back, but
             // we do want to sort the inner fill to maximize overdraw reduction
             orderWithoutCoverage.reverseDepthAsStencil();
+
+            UniquePaintParamsID opaqueID = shading.optimizeForOpacity(keyContext, paintID);
             fDC->recordDraw(fRecorder->priv().rendererProvider()->nonAABounds(), localToDevice,
                             Geometry(Shape(innerFillBounds)), clip, orderWithoutCoverage,
-                            paintID, dstUsage, scopedDrawBuilder.gatherer(),
+                            opaqueID, DstUsage::kNone, scopedDrawBuilder.gatherer(),
                             /*stroke=*/nullptr, latestInsertion);
             // Force the coverage draw to come after the non-AA draw in order to benefit from
             // early depth testing.

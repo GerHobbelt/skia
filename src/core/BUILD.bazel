@@ -22,6 +22,7 @@ CORE_SKSLC_FILES = [
     "SkData.cpp",
     "SkHalf.cpp",
     "SkHalf.h",
+    "SkLog.cpp",
     "SkMalloc.cpp",
     "SkMathPriv.cpp",
     "SkMathPriv.h",
@@ -101,7 +102,6 @@ SEMI_PUBLIC_HEADERS = [
     "SkEdgeClipper.h",
     "SkEffectPriv.h",
     "SkEndian.h",
-    "SkEnumBitMask.h",
     "SkEnumerate.h",
     "SkFDot6.h",
     "SkFixedArray.h",
@@ -547,6 +547,7 @@ skia_filegroup(
         "SkRasterPipelineOpList.h",
         "SkSafeMath.h",
         "SkUtils.h",
+        "SkVx.h",
     ],
     visibility = ["//src/opts:__pkg__"],
 )
