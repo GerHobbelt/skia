@@ -1004,6 +1004,40 @@ void Device::drawImageLattice(const SkImage* image, const SkCanvas::Lattice& lat
     }
 }
 
+void Device::drawAtlas(SkSpan<const SkRSXform> xform,
+                       SkSpan<const SkRect> tex,
+                       SkSpan<const SkColor> colors,
+                       sk_sp<SkBlender> blender,
+                       const SkPaint& paint) {
+    if (xform.empty()) {
+        return;
+    }
+
+    const SkBlender* primitiveBlender = blender ? blender.get()
+                                                : GetBlendModeSingleton(SkBlendMode::kSrcOver);
+    PaintParams baseParams(paint);
+    for (size_t i = 0; i < xform.size(); i++) {
+        SkRect r = tex[i];
+
+        SkMatrix mat;
+        mat.setRSXform(xform[i]);
+        // The rect defined by tex[i] is in the atlas's coordinate space; we perform the
+        // translation so drawAtlas's rects are drawn at (0, 0, r.width(), r.height()).
+        mat.preTranslate(-r.left(), -r.top());
+
+        // Ensure we supply a non-null blender if there is a color defined so the
+        // SoliderColorShaderBlock is still created for the primitive color.
+        this->drawGeometry(Transform(SkM44(this->localToDevice() * mat)),
+                           Geometry(Shape(Rect(r))),
+                           colors.empty()
+                                    ? baseParams
+                                    : baseParams.makeWithPrimitiveColor(
+                                            primitiveBlender,
+                                            SkColor4f::FromColor(colors[i])),
+                           DefaultFillStyle());
+    }
+}
+
 void Device::drawOval(const SkRect& oval, const SkPaint& paint) {
     if (paint.getPathEffect()) {
         // Dashing requires that the oval path starts on the right side and travels clockwise. This
@@ -1766,10 +1800,11 @@ void Device::drawGeometry(const Transform& localToDevice,
     // A draw's order always depends on the clips that must be drawn before it
     order.dependsOnPaintersOrder(clipOrder);
     bool useDrawListLayer = fRecorder->priv().caps()->useDrawListLayer();
+    bool avoidDepthMode = fRecorder->priv().caps()->avoidDepthMode();
     if (!useDrawListLayer) {
         // If a draw is not opaque, it must be drawn after the most recent draw it intersects with
-        // in order to blend correctly.
-        if (dstUsage & DstUsage::kDependsOnDst) {
+        // in order to blend correctly. If there is no depth buffer, then always use painters order.
+        if ((dstUsage & DstUsage::kDependsOnDst) || avoidDepthMode) {
             CompressedPaintersOrder prevDraw =
                 fColorDepthBoundsManager->getMostRecentDraw(clip.drawBounds());
             order.dependsOnPaintersOrder(prevDraw);
@@ -1779,13 +1814,14 @@ void Device::drawGeometry(const Transform& localToDevice,
         // the stencil attachment, we compute a secondary sorting field to allow disjoint draws to
         // reorder the RenderSteps across draws instead of in sequence for each draw.
         if (renderer->depthStencilFlags() & DepthStencilFlags::kStencil) {
+            SkASSERT(!avoidDepthMode);
             DisjointStencilIndex setIndex = fDisjointStencilSet->add(order.paintOrder(),
                                                                     clip.drawBounds());
             order.dependsOnStencil(setIndex);
         } else if (!(dstUsage & DstUsage::kDependsOnDst) &&
                    styleType == SkStrokeRec::kFill_Style &&
                    ((geometry.isEdgeAAQuad() && geometry.edgeAAQuad().isRect()) ||
-                    (geometry.isShape() && geometry.shape().isRect()))) {
+                    (geometry.isShape() && geometry.shape().isRect())) && !avoidDepthMode) {
             // Sort this draw front to back since it will not blend against what came before it. We
             // could do this for all opaque/non-blending draws but that can hurt the performance of
             // the std::sort in DrawPass::Make if it has to effectively reverse a large list. For
@@ -1803,7 +1839,8 @@ void Device::drawGeometry(const Transform& localToDevice,
                                 : renderer,
                         localToDevice, geometry, clip, order, paintID, dstUsage,
                         scopedDrawBuilder.gatherer(), &stroke, latestInsertion);
-    } else if ((dstUsage & DstUsage::kDstOnlyUsedByRenderer) && renderer->useNonAAInnerFill()) {
+    } else if ((dstUsage & DstUsage::kDstOnlyUsedByRenderer) && renderer->useNonAAInnerFill() &&
+               !avoidDepthMode) {
         // Possibly record an additional draw using the non-AA bounds renderer to fill the
         // interior with a renderer that can disable blending entirely.
         Rect innerFillBounds = get_inner_bounds(geometry, localToDevice);
@@ -1861,6 +1898,7 @@ void Device::drawClipShape(const Transform& localToDevice,
         return;
     } else if (!fRecorder->priv().caps()->useDrawListLayer() &&
                (renderer->depthStencilFlags() & DepthStencilFlags::kStencil)) {
+        SkASSERT(!fRecorder->priv().caps()->avoidDepthMode());
         DisjointStencilIndex setIndex = fDisjointStencilSet->add(order.paintOrder(),
                                                                  clip.drawBounds());
         order.dependsOnStencil(setIndex);
