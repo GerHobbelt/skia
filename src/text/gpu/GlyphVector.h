@@ -57,10 +57,10 @@ class StrikeCache;
  */
 namespace GlyphVector_Concepts {
 
-// Both backends currently store pointer-sized types for glyphs and 88 is currently sufficient for
+// Both backends currently store pointer-sized types for glyphs and 104 is currently sufficient for
 // Ganesh and Graphite's BackendData.
 static constexpr size_t kMaxGlyphTypeSize = sizeof(void*);
-static constexpr size_t kMaxBackendDataSize = 96;
+static constexpr size_t kMaxBackendDataSize = 104;
 
 template <typename T>
 concept GlyphType = requires(const T& t) {
@@ -69,7 +69,7 @@ concept GlyphType = requires(const T& t) {
     // sufficient.
     requires alignof(T) <= kMaxGlyphTypeSize;
 
-    std::is_trivially_destructible_v<T>;
+    requires std::is_trivially_destructible_v<T>;
 
     { t.packedID() } -> std::convertible_to<SkPackedGlyphID>;
 };
