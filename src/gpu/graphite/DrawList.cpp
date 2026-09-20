@@ -126,7 +126,9 @@ std::unique_ptr<DrawPass> DrawList::snapDrawPass(Recorder* recorder,
     // bugs in the DrawOrder determination code?
     std::sort(fSortKeys.begin(), fSortKeys.end());
 
-    TRACE_EVENT1_ALWAYS("skia.gpu", TRACE_FUNC, "draw count", fDraws.count());
+    TRACE_EVENT0_ALWAYS("skia.gpu", "Snap DrawPass");
+    TRACE_EVENT_INSTANT1("skia.gpu", "DrawList Stats", TRACE_EVENT_SCOPE_THREAD,
+                         "draw count", fDraws.count());
 
     // The DrawList is converted directly into the DrawPass' data structures, but once the DrawPass
     // is returned from Make(), it is considered immutable.
@@ -200,7 +202,7 @@ std::unique_ptr<DrawPass> DrawList::snapDrawPass(Recorder* recorder,
         if (pipelineChange) {
             drawWriter.newPipelineState(renderStep.primitiveType(),
                                         renderStep.staticDataStride(),
-                                        renderStep.appendDataStride(),
+                                        renderStep.appendDataStride(draw.drawParams()),
                                         renderStep.getRenderStateFlags(),
                                         draw.drawParams().barrierBeforeDraws());
         } else if (stateChange) {
@@ -262,11 +264,11 @@ std::unique_ptr<DrawPass> DrawList::snapDrawPass(Recorder* recorder,
     drawPass->fPipelineDescs   = fPipelineCache.detach();
     drawPass->fSampledTextures = fTextureDataCache.detachTextures();
 
-    TRACE_EVENT_INSTANT2_ALWAYS("skia.gpu",
-                                "DrawPass Stats",
-                                TRACE_EVENT_SCOPE_THREAD,
-                                "# commands", drawPass->fCommandList.count(),
-                                "# textures", drawPass->fSampledTextures.size());
+    TRACE_EVENT_INSTANT2("skia.gpu",
+                         "DrawPass Stats",
+                         TRACE_EVENT_SCOPE_THREAD,
+                         "# commands", drawPass->fCommandList.count(),
+                         "# textures", drawPass->fSampledTextures.size());
 
     this->reset(LoadOp::kLoad);
 

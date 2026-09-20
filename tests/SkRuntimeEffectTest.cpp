@@ -1898,3 +1898,42 @@ DEF_TEST(SkRuntimeShader_b416061512, r) {
         s->getCanvas()->drawPaint(paint);
     }
 }
+
+DEF_TEST(SkRuntimeBlender_b466686344, r) {
+    // b/466686344: large loops in strict ES2 runtime effects must not cause execution timeouts.
+    // Under fuzzer builds (SK_BUILD_FOR_FUZZER), kLoopTerminationLimit is lowered to 256.
+    constexpr const char* kSkSL =
+            "half4 main(half4 src, half4 dst) {"
+            "    half y = 1.0;"
+            "    for (int c = 0; c < 1000; ++c) {"
+            "        y += 1.0;"
+            "    }"
+            "    return half4(y);"
+            "}";
+
+    auto [effect, err] = SkRuntimeEffect::MakeForBlender(SkString(kSkSL));
+#if defined(SK_BUILD_FOR_FUZZER)
+    // In fuzzer builds, loops >= 256 iterations are rejected at compile time.
+    REPORTER_ASSERT(r, !effect);
+    REPORTER_ASSERT(r, err.contains("loop must guarantee termination in fewer iterations"));
+#else
+    REPORTER_ASSERT(r, effect != nullptr);
+#endif
+}
+
+DEF_TEST(SkRuntimeColorFilter_b520831887, r) {
+    // b/520831887: loops with 16-bit integer induction variables (e.g. mediump int)
+    // must not trigger an assertion failure in GetLoopUnrollInfo.
+    constexpr const char* kSkSL =
+            "half4 main(half4 color) {"
+            "    for (mediump int b = 2; b < 4; ++b) {}"
+            "    return color;"
+            "}";
+
+    auto [effect, err] = SkRuntimeEffect::MakeForColorFilter(SkString(kSkSL));
+    REPORTER_ASSERT(r, effect != nullptr, "%s", err.c_str());
+    if (effect) {
+        sk_sp<SkColorFilter> cf = effect->makeColorFilter(nullptr);
+        REPORTER_ASSERT(r, cf != nullptr);
+    }
+}

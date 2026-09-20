@@ -10,7 +10,10 @@ licenses(["notice"])
 skia_cc_binary(
     name = "dump_capture",
     testonly = True,
-    srcs = ["dump_capture.cpp"],
+    srcs = [
+        "dump_base.h",
+        "dump_capture.cpp",
+    ],
     deps = [
         "//:core",
         "//src/core:core_priv",
@@ -323,6 +326,7 @@ skia_cc_library(
     srcs = [
         "//include/codec:headers_to_compile",
         "//include/core:headers_to_compile",
+        "//include/cpu:headers_to_compile",
         "//include/docs:headers_to_compile",
         "//include/effects:headers_to_compile",
         "//include/encode:headers_to_compile",
