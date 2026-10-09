@@ -9,7 +9,7 @@
     },
     {
       "build_file": "//bazel/external/dawn:BUILD.bazel",
-      "commit": "b672eda13605b4561565441f4fb90b63bcab946d",
+      "commit": "395c66d2912485a4e2fa2f212705559251b1eb40",
       "name": "dawn",
       "remote": "https://dawn.googlesource.com/dawn.git"
     },
@@ -197,7 +197,7 @@
       "remote": "https://skia.googlesource.com/external/github.com/KhronosGroup/SPIRV-Headers.git"
     },
     {
-      "commit": "19e35eae1ab1574f31704ac002d77cbad6a064aa",
+      "commit": "486d6136a0f7a7b0ed65d007e2545a8e616e5238",
       "name": "spirv_tools",
       "remote": "https://skia.googlesource.com/external/github.com/KhronosGroup/SPIRV-Tools.git"
     },
@@ -245,7 +245,7 @@
       "remote": "https://skia.googlesource.com/external/github.com/google/brotli.git"
     },
     {
-      "commit": "7f06dec0efe9f5c51b08761baff62dde5c4d7576",
+      "commit": "af5aede14a0b4013be6890148d34e0fd7b1fac69",
       "name": "abseil_cpp",
       "patch_cmds": [
         "find . -name BUILD.bazel -type f -exec sed -i.bak -e '/do_not_use_for_gloop_visibility_only/d' {} +",
