@@ -84,6 +84,10 @@ class Task;
 class TextureProxy;
 class TextureProxyView;
 
+#if defined(SK_ENABLE_SPARSE_STRIPS)
+class StripGenerator;
+#endif
+
 class Device final : public SkDevice {
 public:
     ~Device() override;
@@ -97,7 +101,8 @@ public:
                               const SkColorInfo&,
                               const SkSurfaceProps&,
                               LoadOp initialLoadOp,
-                              bool registerWithRecorder=true);
+                              bool registerWithRecorder=true,
+                              bool allowUnpremul=false);
     // Convenience factory to create the underlying TextureProxy based on the configuration provided
     static sk_sp<Device> Make(Recorder*,
                               const SkImageInfo&,
@@ -107,7 +112,8 @@ public:
                               const SkSurfaceProps&,
                               LoadOp initialLoadOp,
                               std::string_view label,
-                              bool registerWithRecorder=true);
+                              bool registerWithRecorder=true,
+                              bool allowUnpremul=false);
 
     Device* asGraphiteDevice() override { return this; }
 
@@ -405,6 +411,10 @@ private:
 #endif
 
     friend class ClipStack; // for drawClipShape
+
+#if defined(SK_ENABLE_SPARSE_STRIPS)
+    std::unique_ptr<StripGenerator> fStripGenerator;
+#endif
 };
 
 } // namespace skgpu::graphite

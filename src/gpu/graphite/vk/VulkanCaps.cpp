@@ -15,6 +15,7 @@
 #include "include/gpu/vk/VulkanTypes.h"
 #include "include/private/SkMath.h"
 #include "src/gpu/SwizzlePriv.h"
+#include "src/gpu/graphite/ComputePipelineDesc.h"
 #include "src/gpu/graphite/ContextUtils.h"
 #include "src/gpu/graphite/GraphicsPipelineDesc.h"
 #include "src/gpu/graphite/GraphiteResourceKey.h"
@@ -306,6 +307,11 @@ void VulkanCaps::init(const ContextOptions& contextOptions,
     fSupportsHostImageCopy = enabledFeatures.fHostImageCopy &&
                              deviceProperties.fHic.identicalMemoryTypeRequirements &&
                              deviceProperties.fHicHasShaderReadOnlyDstLayout;
+
+    fShaderReadOnlyLayoutSrcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    if (fComputeSupport) {
+        fShaderReadOnlyLayoutSrcStageMask |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+    }
 
     // Note: Do not add extension/feature checks after this; driver workarounds should be done last.
     if (!contextOptions.fDisableDriverCorrectnessWorkarounds) {
@@ -1192,6 +1198,23 @@ bool VulkanCaps::extractGraphicsDescs(const UniqueKey& key,
     }
 
     return true;
+}
+
+UniqueKey VulkanCaps::makeComputePipelineKey(const ComputePipelineDesc& pipelineDesc) const {
+    UniqueKey pipelineKey;
+    {
+        static const skgpu::UniqueKey::Domain kComputePipelineDomain = UniqueKey::GenerateDomain();
+        // The key is made up of a single uint32_t corresponding to the compute step ID.
+        UniqueKey::Builder builder(&pipelineKey, kComputePipelineDomain, 1, "ComputePipeline");
+        builder[0] = pipelineDesc.computeStep()->uniqueID();
+
+        // TODO(b/240615224): The local work group size should factor into the key here since it is
+        // specified in the shader text on Vulkan/SPIR-V. This is not a problem right now since
+        // ComputeSteps don't vary their workgroup size dynamically.
+
+        builder.finish();
+    }
+    return pipelineKey;
 }
 
 void VulkanCaps::buildKeyForTexture(SkISize dimensions,
