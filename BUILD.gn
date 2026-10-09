@@ -35,6 +35,9 @@ config("skia_public") {
   if (skia_enable_optimize_size) {
     defines += [ "SK_ENABLE_OPTIMIZE_SIZE" ]
   }
+  if (skia_enable_packed_422_yuv) {
+    defines += [ "SK_ENABLE_YUVA_PACKED_422" ]
+  }
   if (skia_enable_precompile) {
     defines += [ "SK_ENABLE_PRECOMPILE" ]
   }
@@ -2111,6 +2114,9 @@ skia_component("skia") {
     "modules/skcms",
     "//src/partition_alloc:raw_ptr",
   ]
+  if (skia_use_rust_jpeg_decode) {
+    deps += [ ":jpeg_decode_rust" ]
+  }
 
   public = []
   public += skia_codec_public
