@@ -40,7 +40,6 @@
 #include "src/core/SkAutoPixmapStorage.h"
 #include "src/core/SkBase64.h"
 #include "src/core/SkColorPriv.h"
-#include "src/core/SkExecutors.h"
 #include "src/core/SkLRUCache.h"
 #include "src/core/SkMD5.h"
 #include "src/core/SkOSFile.h"
@@ -49,6 +48,7 @@
 #include "src/core/SkStringUtils.h"
 #include "src/core/SkTLazy.h"
 #include "src/core/SkTSort.h"
+#include "src/core/SkTaskGroup.h"
 #include "src/core/SkTextBlobPriv.h"
 #include "src/core/SkUTF.h"
 #include "src/image/SkImage_Base.h"
@@ -487,7 +487,7 @@ static sk_app::Window::BackendType get_backend_type(const char* str) {
     } else
 #endif
 
-#if defined(SK_VULKAN)
+#if defined(SK_VULKAN) && !defined(SK_BUILD_FOR_MAC)
 #   if defined(SK_GANESH)
     if (0 == strcmp(str, "vk")) {
         return sk_app::Window::BackendType::kVulkan;
@@ -620,7 +620,7 @@ static const Window::BackendType kSupportedBackends[] = {
 #endif
 #endif
 
-#if defined(SK_VULKAN)
+#if defined(SK_VULKAN) && !defined(SK_BUILD_FOR_MAC)
 #   if defined(SK_GANESH)
         sk_app::Window::BackendType::kVulkan,
 #   endif
@@ -729,7 +729,7 @@ Viewer::Viewer(int argc, char** argv, void* platformData)
 #endif
 
     initializeEventTracingForTools();
-    static SkExecutors::Enabler kTaskGroupEnabler(FLAGS_threads);
+    static SkTaskGroup::Enabler kTaskGroupEnabler(FLAGS_threads);
 
     fBackendType = get_backend_type(FLAGS_backend[0]);
     fWindow = Windows::CreateNativeWindow(platformData);
