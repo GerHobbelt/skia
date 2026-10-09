@@ -25,6 +25,7 @@
 #include "src/gpu/graphite/geom/Geometry.h"
 #include "src/gpu/graphite/geom/Shape.h"
 #include "src/gpu/graphite/geom/Transform.h"
+#include "src/gpu/graphite/render/CommonDepthStencilSettings.h"
 #include "src/gpu/graphite/render/DynamicInstancesPatchAllocator.h"
 #include "src/gpu/tessellate/FixedCountBufferUtils.h"
 #include "src/gpu/tessellate/MidpointContourParser.h"
@@ -79,18 +80,21 @@ static constexpr SkSpan<const Attribute> kAttributes[2] = {kAttributesWithCurveT
 
 }  // namespace
 
+// When this is used for even-odd or winding fills, it's a non-shading step so any self
+// intersections are acceptable and handled gracefully with stencil buffer updates. When it's used
+// as the convex path renderer, none of its emitted geometry will have self-intersections because
+// the paths are known to be convex (and thus also a single contour).
 TessellateWedgesRenderStep::TessellateWedgesRenderStep(Layout layout,
                                                        RenderStepID renderStepID,
                                                        bool infinitySupport,
+                                                       SkEnumBitMask<Flags> xtraFlags,
                                                        DepthStencilSettings depthStencilSettings,
                                                        StaticBufferManager* bufferManager)
         : RenderStep(layout,
                      renderStepID,
-                     Flags::kRequiresMSAA |
-                     Flags::kAppendDynamicInstances |
-                     Flags::kIgnoreInverseFill |
-                     (depthStencilSettings.fDepthWriteEnabled ? Flags::kPerformsShading
-                                                              : Flags::kNone),
+                     Flags::kRequiresMSAA | Flags::kAppendDynamicInstances
+                                          | Flags::kIgnoreInverseFill
+                                          | xtraFlags,
                      /*uniforms=*/{{"localToDevice", SkSLType::kFloat4x4}},
                      PrimitiveType::kTriangles,
                      depthStencilSettings,
@@ -118,6 +122,32 @@ TessellateWedgesRenderStep::TessellateWedgesRenderStep(Layout layout,
 }
 
 TessellateWedgesRenderStep::~TessellateWedgesRenderStep() {}
+
+std::unique_ptr<TessellateWedgesRenderStep> TessellateWedgesRenderStep::StencilFill(
+        Layout layout, bool evenOdd, bool infinitySupport, StaticBufferManager* bufferManager) {
+    // For stencil fills, allow self intersections to update the stencil buffer counts appropriately
+    // The final winding rule will be evaluated by a separate cover step that won't result in
+    // double blending for its shading pass.
+    static constexpr SkEnumBitMask<Flags> kStencilFlags = Flags::kAllowsSelfIntersection;
+
+    RenderStepID id = evenOdd ? RenderStepID::kTessellateWedges_EvenOdd
+                              : RenderStepID::kTessellateWedges_Winding;
+    auto dss = evenOdd ? kEvenOddStencilPass : kWindingStencilPass;
+    return std::unique_ptr<TessellateWedgesRenderStep>(new TessellateWedgesRenderStep(
+            layout, id, infinitySupport, kStencilFlags, dss, bufferManager));
+}
+
+std::unique_ptr<TessellateWedgesRenderStep> TessellateWedgesRenderStep::ConvexFill(
+        Layout layout, bool infinitySupport, StaticBufferManager* bufferManager) {
+    // When convex, the render step shades and doesn't use the stencil buffer at all. Since the
+    // paths are known to be convex, the emitted triangles should not produce self intersections.
+    static constexpr SkEnumBitMask<Flags> kConvexFlags =
+            Flags::kPerformsShading | Flags::kNoSelfIntersections;
+
+    return std::unique_ptr<TessellateWedgesRenderStep>(new TessellateWedgesRenderStep(
+            layout, RenderStepID::kTessellateWedges_Convex, infinitySupport,
+            kConvexFlags, kDirectDepthLEqualPass, bufferManager));
+}
 
 std::string TessellateWedgesRenderStep::vertexSkSL(const RootNodesInfo&) const {
     return SkSL::String::printf(

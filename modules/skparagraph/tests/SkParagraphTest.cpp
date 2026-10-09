@@ -370,7 +370,7 @@ UNIX_ONLY_TEST(SkParagraph_Rounding_Off_LineBreaks, reporter) {
     }
 }
 
-DEF_TEST(SkParagraph_PlaceholderLogicalOrder, reporter) {
+UNIX_ONLY_TEST(SkParagraph_PlaceholderLogicalOrder, reporter) {
     // No external fonts are required: the paragraph contains only placeholders.
     // Regression test for https://github.com/flutter/flutter/issues/54400.
     for (auto direction : {TextDirection::kLtr, TextDirection::kRtl}) {
@@ -420,7 +420,7 @@ DEF_TEST(SkParagraph_PlaceholderLogicalOrder, reporter) {
     }
 }
 
-DEF_TEST(SkParagraph_PlaceholderLogicalOrderMixedDirections, reporter) {
+UNIX_ONLY_TEST(SkParagraph_PlaceholderLogicalOrderMixedDirections, reporter) {
     for (auto direction : {TextDirection::kLtr, TextDirection::kRtl}) {
         auto fonts = sk_make_sp<FontCollection>();
         fonts->setDefaultFontManager(ToolUtils::TestFontMgr());
@@ -481,7 +481,7 @@ DEF_TEST(SkParagraph_PlaceholderLogicalOrderMixedDirections, reporter) {
     }
 }
 
-DEF_TEST(SkParagraph_PlaceholderLogicalOrderMaxLines, reporter) {
+UNIX_ONLY_TEST(SkParagraph_PlaceholderLogicalOrderMaxLines, reporter) {
     ParagraphStyle style;
     style.setTextDirection(TextDirection::kRtl);
     style.setMaxLines(1);
@@ -502,7 +502,7 @@ DEF_TEST(SkParagraph_PlaceholderLogicalOrderMaxLines, reporter) {
     }
 }
 
-DEF_TEST(SkParagraph_PlaceholderLogicalOrderLanguages, reporter) {
+UNIX_ONLY_TEST(SkParagraph_PlaceholderLogicalOrderLanguages, reporter) {
     auto fonts = sk_make_sp<ResourceFontCollection>();
     SKIP_IF_FONTS_NOT_FOUND(reporter, fonts)
     struct Sample {
@@ -9195,3 +9195,56 @@ UNIX_ONLY_TEST(SkParagraph_ICU4X_EmojiRuns, reporter) {
     SkUnicode_Emoji(SkUnicodes::ICU4X::Make(), reporter);
 }
 #endif
+
+// Uses DEF_TEST rather than UNIX_ONLY_TEST so Windows ASAN bots exercise STArray<4, ...>
+// reallocation of TextStyle, Block, and Placeholder when growing past inline capacity 4
+DEF_TEST(SkParagraph_InlineCapacityGrowthRelocation, reporter) {
+    auto fontCollection = sk_make_sp<FontCollection>();
+    fontCollection->setDefaultFontManager(ToolUtils::TestFontMgr());
+    fontCollection->enableFontFallback();
+
+    ParagraphStyle paragraphStyle;
+    ParagraphBuilderImpl builder(paragraphStyle, fontCollection, get_unicode());
+
+    for (int i = 0; i < 6; ++i) {
+        TextStyle style;
+        style.setFontSize(14.0f + i);
+        style.setFontFamilies({SkString("sans-serif")});
+        style.addFontFeature(SkString("liga"), i % 2);
+        style.addShadow(TextShadow(SK_ColorBLACK, SkPoint::Make(1.0f, 1.0f), 2.0f));
+        if (i % 2 == 1) {
+            SkFontArguments::VariationPosition::Coordinate coord = {
+                    SkSetFourByteTag('w', 'g', 'h', 't'), 400.0f + i * 50.0f};
+            SkFontArguments fontArgs;
+            fontArgs.setVariationDesignPosition({&coord, 1});
+            style.setFontArguments(fontArgs);
+        }
+        builder.pushStyle(style);
+        builder.addText("word ");
+        if (i < 5) {
+            builder.addPlaceholder(PlaceholderStyle(10.0f,
+                                                    12.0f,
+                                                    PlaceholderAlignment::kBaseline,
+                                                    TextBaseline::kAlphabetic,
+                                                    0.0f));
+        }
+    }
+    for (int i = 0; i < 6; ++i) {
+        builder.pop();
+    }
+
+    auto paragraph = builder.Build();
+    paragraph->layout(TestCanvasWidth);
+
+    auto rects = paragraph->getRectsForPlaceholders();
+    REPORTER_ASSERT(reporter, rects.size() == 5);
+
+    auto* impl = static_cast<ParagraphImpl*>(paragraph.get());
+    REPORTER_ASSERT(reporter, impl->styles().size() == 11);
+    REPORTER_ASSERT(reporter, !impl->styles()[0].fStyle.getFontArguments().has_value());
+    REPORTER_ASSERT(reporter, !impl->styles()[1].fStyle.getFontArguments().has_value());
+    REPORTER_ASSERT(reporter, impl->styles()[2].fStyle.getFontArguments().has_value());
+    REPORTER_ASSERT(reporter, impl->styles()[2].fStyle.getFontFeatureNumber() == 1);
+    REPORTER_ASSERT(reporter, impl->styles()[2].fStyle.getShadowNumber() == 1);
+}
+
