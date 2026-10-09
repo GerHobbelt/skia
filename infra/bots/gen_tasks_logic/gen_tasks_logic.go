@@ -481,6 +481,7 @@ func GenTasks(cfg *Config) {
 			"skia/.bazelrc",
 			"skia/.bazeliskrc",
 			"skia/.bazelversion",
+			"skia/.gitignore",
 			"skia/BUILD.bazel",
 			"skia/LICENSE", // Referred to by default_applicable_licenses
 			"skia/MODULE.bazel",
@@ -853,7 +854,7 @@ var androidDeviceInfos = map[string][]string{
 	"Pixel4":          {"flame", "RPB2.200611.009"}, // R Preview
 	"Pixel4a":         {"sunfish", "AOSP.MASTER"},   // Pixel4a flashed with an Android HWASan build.
 	"Pixel4XL":        {"coral", "QD1A.190821.011.C4"},
-	"Pixel5":          {"redfin", "RD1A.200810.022.A4"},
+	"Pixel5":          {"redfin", "SP2A.220305.012"},
 	"Pixel6":          {"oriole", "SD1A.210817.037"},
 	"Pixel7":          {"panther", "AP4A.241205.013"},
 	"Pixel7Pro":       {"cheetah", "TD1A.221105.002"},
@@ -912,6 +913,8 @@ func (b *TaskBuilder) defaultSwarmDimensions() {
 			d["pool"] = "SkiaIOS"
 			if b.Model("iPhone11") {
 				d["os"] = "iOS-18.4"
+			} else if b.Model("iPhone8") {
+				d["os"] = "iOS-16.7"
 			}
 		}
 		if b.Parts["model"] == "iPadPro" {
@@ -1210,6 +1213,8 @@ func (b *TaskBuilder) maybeAddIosDevImage() {
 				asset = "ios-dev-image-13.5"
 			case "13.6":
 				asset = "ios-dev-image-13.6"
+			case "16.7":
+				asset = "ios-dev-image-16.7"
 			case "18.2.1", "18.4":
 				// Newer iOS versions don't use a pre-packaged dev image.
 			default:
