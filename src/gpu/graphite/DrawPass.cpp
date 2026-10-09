@@ -22,7 +22,6 @@
 #include "src/gpu/graphite/Texture.h"  // IWYU pragma: keep
 #include "src/gpu/graphite/TextureProxy.h"
 
-
 using namespace skia_private;
 
 namespace skgpu::graphite {
@@ -76,6 +75,15 @@ bool DrawPass::prepareResources(ResourceProvider* resourceProvider,
         }
     }
 
+    if (fStorageFallbackTexture) {
+        SkASSERT(fStorageFallbackTexture->textureInfo().isValid());
+        if (!fStorageFallbackTexture->isInstantiated() && !fStorageFallbackTexture->isLazy()) {
+            SKIA_LOG_W("Cannot sample from an uninstantiated TextureProxy, label %s",
+                        fStorageFallbackTexture->label());
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -88,12 +96,13 @@ bool DrawPass::addResourceRefs(ResourceProvider* resourceProvider,
 
     SkASSERT(fPipelineHandles.size() == fPipelineDrawAreas.size());
     for (int i = 0; i < fPipelineHandles.size(); ++i) {
-        sk_sp<GraphicsPipeline> pipeline = pipelineManager->resolveHandle(sharedContext,
-                                                                          fPipelineHandles[i]);
+        sk_sp<GraphicsPipeline> pipeline = pipelineManager->resolveHandle(fPipelineHandles[i]);
         if (!pipeline) {
             SKIA_LOG_W("Failed to create Pipeline for draw in RenderPass. Dropping draw!");
             return false;
         }
+
+        fStorageBufferStages |= pipeline->storageBufferStages();
 
         TRACE_EVENT_INSTANT1_ALWAYS(
                 "skia.shaders",
@@ -110,7 +119,21 @@ bool DrawPass::addResourceRefs(ResourceProvider* resourceProvider,
         commandBuffer->trackResource(fSampledTextures[i]->refTexture());
     }
 
+    if (fStorageFallbackTexture) {
+        commandBuffer->trackResource(fStorageFallbackTexture->refTexture());
+    }
+
     return true;
+}
+
+void DrawPass::setStorageResult(StorageContextResult result) {
+    if (std::holds_alternative<BindBufferInfo>(result)) {
+        fStorageBufferInfo = std::get<BindBufferInfo>(result);
+        SkASSERT(fStorageBufferInfo);
+    } else {
+        fStorageFallbackTexture = std::move(std::get<sk_sp<TextureProxy>>(result));
+        SkASSERT(fStorageFallbackTexture);
+    }
 }
 
 } // namespace skgpu::graphite
