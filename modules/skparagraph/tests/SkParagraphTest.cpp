@@ -5854,6 +5854,31 @@ DEF_TEST_DISABLED(SkParagraph_JSON2, reporter) {
     REPORTER_ASSERT(reporter, cluster <= 2);
 }
 
+UNIX_ONLY_TEST(SkParagraph_CachePreservesUnresolvedGlyphs, reporter) {
+    sk_sp<ResourceFontCollection> fonts = sk_make_sp<ResourceFontCollection>();
+    SKIP_IF_FONTS_NOT_FOUND(reporter, fonts)
+    fonts->disableFontFallback();
+    ParagraphStyle style;
+    TextStyle textStyle;
+    textStyle.setFontFamilies({SkString("Roboto")});
+    textStyle.setFontSize(14);
+    style.setTextStyle(textStyle);
+    auto make = [&](SkScalar width) {
+        ParagraphBuilderImpl builder(style, fonts, get_unicode());
+        builder.addText("missing \xF3\xB0\x80\x80"); // U+F0000 has no Roboto glyph.
+        auto paragraph = builder.Build();
+        paragraph->layout(width);
+        return paragraph;
+    };
+    auto cold = make(120);
+    const auto unresolved = cold->unresolvedCodepoints();
+    REPORTER_ASSERT(reporter, cold->unresolvedGlyphs() == 1);
+    REPORTER_ASSERT(reporter, unresolved.size() == 1 && unresolved.count(0xF0000) == 1);
+    auto cached = make(180);
+    REPORTER_ASSERT(reporter, cached->unresolvedGlyphs() == cold->unresolvedGlyphs());
+    REPORTER_ASSERT(reporter, cached->unresolvedCodepoints() == unresolved);
+}
+
 UNIX_ONLY_TEST(SkParagraph_CacheText, reporter) {
     ParagraphCache cache;
     cache.turnOn(true);
@@ -6044,6 +6069,245 @@ DEF_TEST(SkParagraph_ParagraphStyleHeightIgnored, reporter) {
     auto triple = layout(3.0f);
     REPORTER_ASSERT(reporter, found);
     REPORTER_ASSERT(reporter, triple->getHeight() == single->getHeight());
+}
+
+// ParagraphCache compares styles by the effective height the shaper uses
+DEF_TEST(SkParagraph_EqualsByFontsUsesEffectiveHeight, reporter) {
+    TextStyle overridden;
+    overridden.setHeightOverride(true);
+    overridden.setHeight(2.0f);
+
+    TextStyle ignored = overridden;
+    ignored.setHeightOverride(false);
+    REPORTER_ASSERT(reporter, !overridden.equalsByFonts(ignored));
+
+    TextStyle otherIgnored = ignored;
+    otherIgnored.setHeight(3.0f);
+    REPORTER_ASSERT(reporter, ignored.equalsByFonts(otherIgnored));
+}
+
+namespace {
+struct CacheProbe {
+    std::function<void(ParagraphStyle&, TextStyle& text, TextStyle& placeholder)> fMutate;
+    const char* fName;
+};
+
+// Lays out a paragraph with text and a placeholder, reporting whether the cache was hit
+bool layoutHitsCache(sk_sp<FontCollection> fontCollection, const CacheProbe* probe) {
+    ParagraphStyle paragraphStyle;
+    StrutStyle strutStyle;
+    strutStyle.setStrutEnabled(true);
+    strutStyle.setFontSize(30.0f);
+    strutStyle.setHeightOverride(true);
+    strutStyle.setHeight(2.0f);
+    paragraphStyle.setStrutStyle(strutStyle);
+    TextStyle textStyle;
+    textStyle.setFontSize(30.0f);
+    textStyle.setHeightOverride(true);
+    textStyle.setHeight(2.0f);
+    TextStyle placeholderTextStyle = textStyle;
+    if (probe) {
+        probe->fMutate(paragraphStyle, textStyle, placeholderTextStyle);
+    }
+
+    ParagraphBuilderImpl builder(paragraphStyle, fontCollection, get_unicode());
+    builder.pushStyle(textStyle);
+    builder.addText("Hello world");
+    builder.pop();
+    builder.pushStyle(placeholderTextStyle);
+    builder.addPlaceholder(PlaceholderStyle(20, 20, PlaceholderAlignment::kTop,
+                                            TextBaseline::kAlphabetic, 0));
+    builder.pop();
+    auto paragraph = builder.Build();
+
+    bool found = false;
+    fontCollection->getParagraphCache()->setChecker(
+            [&found](ParagraphImpl*, const char* event, bool) {
+                found |= strcmp(event, "foundParagraph") == 0;
+            });
+    paragraph->layout(1000.0f);
+    fontCollection->getParagraphCache()->setChecker([](ParagraphImpl*, const char*, bool) {});
+    return found;
+}
+}  // namespace
+
+// Changing any shaping input must miss ParagraphCache, or stale shaped runs are reused
+DEF_TEST(SkParagraph_CacheKeyCoversShapingInputs, reporter) {
+    auto makeCollection = []() {
+        auto fontCollection = sk_make_sp<FontCollection>();
+        fontCollection->setDefaultFontManager(ToolUtils::TestFontMgr());
+        return fontCollection;
+    };
+
+    auto same = makeCollection();
+    layoutHitsCache(same, nullptr);
+    REPORTER_ASSERT(reporter, layoutHitsCache(same, nullptr));
+
+    // Without the override the shaper ignores the height value
+    CacheProbe ignoredHeight = {[](ParagraphStyle&, TextStyle& t, TextStyle& p) {
+        t.setHeightOverride(false);
+        p.setHeightOverride(false);
+    }, "ignoredHeight"};
+    CacheProbe otherIgnoredHeight = {[](ParagraphStyle&, TextStyle& t, TextStyle& p) {
+        t.setHeightOverride(false);
+        t.setHeight(3.0f);
+        p.setHeightOverride(false);
+        p.setHeight(3.0f);
+    }, "otherIgnoredHeight"};
+    auto heights = makeCollection();
+    layoutHitsCache(heights, &ignoredHeight);
+    REPORTER_ASSERT(reporter, layoutHitsCache(heights, &otherIgnoredHeight));
+
+    const CacheProbe probes[] = {
+        {[](ParagraphStyle&, TextStyle& t, TextStyle&) { t.setHalfLeading(true); },
+         "halfLeading"},
+        {[](ParagraphStyle&, TextStyle& t, TextStyle&) { t.setHeightOverride(false); },
+         "heightOverride"},
+        {[](ParagraphStyle&, TextStyle& t, TextStyle&) {
+             t.setFontEdging(SkFont::Edging::kAlias);
+         }, "edging"},
+        {[](ParagraphStyle&, TextStyle& t, TextStyle&) {
+             t.setFontHinting(SkFontHinting::kFull);
+         }, "hinting"},
+        {[](ParagraphStyle&, TextStyle& t, TextStyle&) { t.setSubpixel(false); }, "subpixel"},
+        {[](ParagraphStyle& s, TextStyle&, TextStyle&) { s.setFakeMissingFontStyles(false); },
+         "fakeMissingFontStyles"},
+        {[](ParagraphStyle& s, TextStyle&, TextStyle&) { s.setLetterSpacingByCSSSpec(true); },
+         "letterSpacingByCSSSpec"},
+        {[](ParagraphStyle& s, TextStyle&, TextStyle&) {
+             StrutStyle strut = s.getStrutStyle();
+             strut.setHalfLeading(true);
+             s.setStrutStyle(strut);
+         }, "strutHalfLeading"},
+        {[](ParagraphStyle&, TextStyle&, TextStyle& p) { p.setFontSize(80.0f); },
+         "placeholderFontSize"},
+    };
+    for (const CacheProbe& probe : probes) {
+        auto fontCollection = makeCollection();
+        layoutHitsCache(fontCollection, nullptr);
+        REPORTER_ASSERT(reporter, !layoutHitsCache(fontCollection, &probe), "%s", probe.fName);
+    }
+}
+
+// Toggling the leading distribution on the same text must change the laid out baseline
+DEF_TEST(SkParagraph_CachedLayoutFollowsHalfLeading, reporter) {
+    auto baselineOf = [](sk_sp<FontCollection> fontCollection, bool halfLeading) {
+        TextStyle textStyle;
+        textStyle.setFontSize(13.0f);
+        textStyle.setHeightOverride(true);
+        textStyle.setHeight(22.5f / 13.0f);
+        textStyle.setHalfLeading(halfLeading);
+        ParagraphStyle paragraphStyle;
+        ParagraphBuilderImpl builder(paragraphStyle, fontCollection, get_unicode());
+        builder.pushStyle(textStyle);
+        builder.addText("Hello");
+        builder.pop();
+        auto paragraph = builder.Build();
+        paragraph->layout(1000.0f);
+        return paragraph->getAlphabeticBaseline();
+    };
+    auto makeCollection = []() {
+        auto fontCollection = sk_make_sp<FontCollection>();
+        fontCollection->setDefaultFontManager(ToolUtils::TestFontMgr());
+        return fontCollection;
+    };
+
+    for (bool first : {false, true}) {
+        const SkScalar expected = baselineOf(makeCollection(), !first);
+        auto shared = makeCollection();
+        const SkScalar previous = baselineOf(shared, first);
+        REPORTER_ASSERT(reporter, !SkScalarNearlyEqual(previous, expected, EPSILON100));
+        REPORTER_ASSERT(reporter,
+                        SkScalarNearlyEqual(baselineOf(shared, !first), expected, EPSILON100),
+                        "halfLeading %d after %d", !first, first);
+    }
+}
+
+// A paragraph restored from ParagraphCache must report the same font resolution
+DEF_TEST(SkParagraph_CacheRestoresFontResolution, reporter) {
+    auto fontCollection = sk_make_sp<FontCollection>();
+    fontCollection->setDefaultFontManager(ToolUtils::TestFontMgr());
+
+    bool found = false;
+    auto layout = [&]() {
+        ParagraphStyle paragraphStyle;
+        TextStyle textStyle;
+        textStyle.setFontSize(30.0f);
+        ParagraphBuilderImpl builder(paragraphStyle, fontCollection, get_unicode());
+        builder.pushStyle(textStyle);
+        builder.addText("Hello \xE2\xBF\xB0 \xF0\x9F\x98\x80");
+        builder.pop();
+        auto paragraph = builder.Build();
+        found = false;
+        fontCollection->getParagraphCache()->setChecker(
+                [&found](ParagraphImpl*, const char* event, bool) {
+                    found |= strcmp(event, "foundParagraph") == 0;
+                });
+        paragraph->layout(1000.0f);
+        return paragraph;
+    };
+
+    auto shaped = layout();
+    REPORTER_ASSERT(reporter, !found);
+    auto cached = layout();
+    REPORTER_ASSERT(reporter, found);
+    fontCollection->getParagraphCache()->setChecker([](ParagraphImpl*, const char*, bool) {});
+
+    auto* shapedImpl = static_cast<ParagraphImpl*>(shaped.get());
+    auto* cachedImpl = static_cast<ParagraphImpl*>(cached.get());
+    REPORTER_ASSERT(reporter,
+                    cachedImpl->resolvedFonts().size() == shapedImpl->resolvedFonts().size());
+}
+
+// Adjacent styles that differ in any font setting must be shaped separately
+DEF_TEST(SkParagraph_ShapingKeepsFontSettingsPerStyle, reporter) {
+    auto fontCollection = sk_make_sp<FontCollection>();
+    fontCollection->setDefaultFontManager(ToolUtils::TestFontMgr());
+    fontCollection->getParagraphCache()->turnOn(false);
+
+    auto widthOf = [&](const TextStyle& first, const TextStyle& second) {
+        ParagraphStyle paragraphStyle;
+        ParagraphBuilderImpl builder(paragraphStyle, fontCollection, get_unicode());
+        builder.pushStyle(first);
+        builder.addText("Hello ");
+        builder.pop();
+        builder.pushStyle(second);
+        builder.addText("world");
+        builder.pop();
+        auto paragraph = builder.Build();
+        paragraph->layout(1000.0f);
+        return paragraph->getMaxIntrinsicWidth();
+    };
+
+    TextStyle subpixel;
+    subpixel.setFontSize(30.0f);
+    TextStyle whole = subpixel;
+    whole.setSubpixel(false);
+    REPORTER_ASSERT(reporter, widthOf(subpixel, subpixel) != widthOf(whole, whole));
+    REPORTER_ASSERT(reporter, widthOf(whole, subpixel) != widthOf(whole, whole));
+
+    TextStyle overridden = subpixel;
+    overridden.setHeightOverride(true);
+    overridden.setHeight(3.0f);
+    TextStyle ignored = overridden;
+    ignored.setHeightOverride(false);
+
+    ParagraphStyle paragraphStyle;
+    ParagraphBuilderImpl builder(paragraphStyle, fontCollection, get_unicode());
+    builder.pushStyle(ignored);
+    builder.addText("Hello ");
+    builder.pop();
+    builder.pushStyle(overridden);
+    builder.addText("world");
+    builder.pop();
+    auto paragraph = builder.Build();
+    paragraph->layout(1000.0f);
+    auto* impl = static_cast<ParagraphImpl*>(paragraph.get());
+    REPORTER_ASSERT(reporter, impl->runs().size() == 2);
+    if (impl->runs().size() == 2) {
+        REPORTER_ASSERT(reporter, impl->runs()[0].heightMultiplier() == 0);
+        REPORTER_ASSERT(reporter, impl->runs()[1].heightMultiplier() == 3.0f);
+    }
 }
 
 UNIX_ONLY_TEST(SkParagraph_ParagraphWithLineBreak, reporter) {
@@ -10191,6 +10455,221 @@ UNIX_ONLY_TEST(SkParagraph_SoftHyphenCustomString, reporter) {
     auto* implEmpty = static_cast<ParagraphImpl*>(pEmpty.get());
     REPORTER_ASSERT(reporter, implEmpty->lines().size() == 2);
     REPORTER_ASSERT(reporter, implEmpty->lines()[0].hyphen() == nullptr);
+}
+
+// Returns `text` with each '~' replaced by a soft hyphen (U+00AD).
+static std::string withSoftHyphens(const char* text) {
+    std::string result;
+    for (const char* c = text; *c != '\0'; ++c) {
+        if (*c == '~') {
+            result += "\xC2\xAD";
+        } else {
+            result += *c;
+        }
+    }
+    return result;
+}
+
+// Lays out `text`, with '~' for each soft hyphen, in Roboto 20 with rendered soft hyphens at
+// `width`. The rounding hack is off (as in Flutter) so that line widths can be compared exactly.
+static std::unique_ptr<Paragraph> layoutWithSoftHyphens(
+        sk_sp<ResourceFontCollection> fontCollection,
+        const char* text,
+        SkScalar width,
+        const std::function<void(ParagraphStyle&)>& configure = nullptr) {
+    ParagraphStyle paragraph_style;
+    paragraph_style.turnHintingOff();
+    paragraph_style.setApplyRoundingHack(false);
+    paragraph_style.setRenderSoftHyphens(true);
+    if (configure) {
+        configure(paragraph_style);
+    }
+    ParagraphBuilderImpl builder(paragraph_style, fontCollection, get_unicode());
+    TextStyle text_style;
+    text_style.setFontFamilies({SkString("Roboto")});
+    text_style.setFontSize(20);
+    text_style.setColor(SK_ColorBLACK);
+    builder.pushStyle(text_style);
+    std::string utf8 = withSoftHyphens(text);
+    builder.addText(utf8.c_str(), utf8.size());
+    builder.pop();
+    auto paragraph = builder.Build();
+    paragraph->layout(width);
+    return paragraph;
+}
+
+// The width of `text` on a single line.
+static SkScalar singleLineWidth(sk_sp<ResourceFontCollection> fontCollection, const char* text) {
+    return layoutWithSoftHyphens(fontCollection, text, 10000)->getMaxIntrinsicWidth();
+}
+
+// Each line's text and whether it ends in a rendered hyphen, e.g. "xy|abcd-|efgh".
+static SkString describeLines(Paragraph* paragraph) {
+    auto impl = static_cast<ParagraphImpl*>(paragraph);
+    SkString result;
+    for (auto& line : impl->lines()) {
+        if (!result.isEmpty()) {
+            result.append("|");
+        }
+        auto range = line.trimmedText();
+        for (size_t i = range.start; i < range.end; ++i) {
+            char c = impl->text()[i];
+            // Leave out the soft hyphen's two UTF-8 bytes.
+            if ((c & 0x80) == 0) {
+                result.append(&c, 1);
+            }
+        }
+        if (line.hyphen() != nullptr) {
+            result.append("-");
+        }
+    }
+    return result;
+}
+
+// Checks describeLines(paragraph) against `expected`, reporting the actual lines if they differ.
+static void checkLines(skiatest::Reporter* reporter, Paragraph* paragraph, const char* expected) {
+    SkString lines = describeLines(paragraph);
+    REPORTER_ASSERT(reporter, lines.equals(expected), "lines: %s", lines.c_str());
+}
+
+// A soft hyphen break also draws a hyphen, so it only fits if the hyphen does too. If it
+// doesn't, the line breaks at the earlier space instead, like browsers do.
+UNIX_ONLY_TEST(SkParagraph_SoftHyphenBreakReservesHyphenWidth, reporter) {
+    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>(true);
+    SKIP_IF_FONTS_NOT_FOUND(reporter, fontCollection)
+
+    SkScalar hyphen = singleLineWidth(fontCollection, "-");
+    SkScalar width = singleLineWidth(fontCollection, "xy abcd") + hyphen / 2;
+    auto paragraph = layoutWithSoftHyphens(fontCollection, "xy abcd~efgh", width);
+    checkLines(reporter, paragraph.get(), "xy|abcd-|efgh");
+    REPORTER_ASSERT(reporter, paragraph->getLongestLine() <= width);
+}
+
+// Likewise, an earlier soft hyphen is used when the later one doesn't fit with its hyphen.
+UNIX_ONLY_TEST(SkParagraph_SoftHyphenBreakFallsBackToEarlierSoftHyphen, reporter) {
+    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>(true);
+    SKIP_IF_FONTS_NOT_FOUND(reporter, fontCollection)
+
+    SkScalar hyphen = singleLineWidth(fontCollection, "-");
+    SkScalar width = singleLineWidth(fontCollection, "abcd") + hyphen / 2;
+    auto paragraph = layoutWithSoftHyphens(fontCollection, "ab~cd~efgh", width);
+    checkLines(reporter, paragraph.get(), "ab-|cd-|efgh");
+    REPORTER_ASSERT(reporter, paragraph->getLongestLine() <= width);
+}
+
+// When several soft hyphen breaks don't fit with their hyphens, the line ends at the last break
+// that does: here, the space.
+UNIX_ONLY_TEST(SkParagraph_SoftHyphenBreakFallsBackPastSoftHyphensThatDontFit, reporter) {
+    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>(true);
+    SKIP_IF_FONTS_NOT_FOUND(reporter, fontCollection)
+
+    SkScalar hyphen = singleLineWidth(fontCollection, "-");
+    SkScalar width = singleLineWidth(fontCollection, "x ab") + hyphen / 2;
+    auto paragraph = layoutWithSoftHyphens(fontCollection, "x ab~cd~ef", width);
+    SkString lines = describeLines(paragraph.get());
+    REPORTER_ASSERT(reporter, lines.startsWith("x|ab-|"), "lines: %s", lines.c_str());
+    REPORTER_ASSERT(reporter, paragraph->getLongestLine() <= width);
+}
+
+// The room reserved is the width of the hyphen string that's drawn, not of "-".
+UNIX_ONLY_TEST(SkParagraph_SoftHyphenBreakReservesCustomHyphenWidth, reporter) {
+    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>(true);
+    SKIP_IF_FONTS_NOT_FOUND(reporter, fontCollection)
+
+    SkScalar hyphen = singleLineWidth(fontCollection, "-");
+    SkScalar width = singleLineWidth(fontCollection, "xy abcd") + hyphen * 1.5f;
+    const char* text = "xy abcd~efgh";
+    auto paragraph = layoutWithSoftHyphens(fontCollection, text, width);
+    checkLines(reporter, paragraph.get(), "xy abcd-|efgh");
+    paragraph = layoutWithSoftHyphens(fontCollection, text, width, [](ParagraphStyle& style) {
+        style.setSoftHyphenString(SkString("--"));
+    });
+    checkLines(reporter, paragraph.get(), "xy|abcd-|efgh");
+    REPORTER_ASSERT(reporter, paragraph->getLongestLine() <= width);
+}
+
+// A line that gets an ellipsis draws no hyphen, so it breaks the same whether or not soft
+// hyphens are rendered.
+UNIX_ONLY_TEST(SkParagraph_SoftHyphenBreakOnEllipsisLineReservesNoRoom, reporter) {
+    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>(true);
+    SKIP_IF_FONTS_NOT_FOUND(reporter, fontCollection)
+
+    SkScalar hyphen = singleLineWidth(fontCollection, "-");
+    SkScalar width = singleLineWidth(fontCollection, "xy abcd") + hyphen / 2;
+    const char* text = "xy abcd~efgh ijkl";
+    auto lines = [&](bool renderSoftHyphens) {
+        auto paragraph = layoutWithSoftHyphens(
+                fontCollection, text, width, [renderSoftHyphens](ParagraphStyle& style) {
+                    style.setRenderSoftHyphens(renderSoftHyphens);
+                    style.setMaxLines(1);
+                    style.setEllipsis(SkString("..."));
+                });
+        auto impl = static_cast<ParagraphImpl*>(paragraph.get());
+        REPORTER_ASSERT(reporter, impl->lines().size() == 1);
+        REPORTER_ASSERT(reporter, impl->lines()[0].ellipsis() != nullptr);
+        REPORTER_ASSERT(reporter, impl->lines()[0].hyphen() == nullptr);
+        return impl->lines()[0].trimmedText();
+    };
+    REPORTER_ASSERT(reporter, lines(true) == lines(false));
+}
+
+// A placeholder that doesn't fit ends the line after the word before it, so an earlier soft
+// hyphen that wouldn't fit with its hyphen doesn't matter.
+UNIX_ONLY_TEST(SkParagraph_SoftHyphenBreakBeforePlaceholderNeedsNoRoom, reporter) {
+    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>(true);
+    SKIP_IF_FONTS_NOT_FOUND(reporter, fontCollection)
+
+    const char* text = "xy abcd~i";
+    SkScalar width = singleLineWidth(fontCollection, text) + 0.3f;
+    SkScalar hyphenated = singleLineWidth(fontCollection, "xy abcd-");
+    REPORTER_ASSERT(reporter, hyphenated > width + 0.3f, "%g vs %g", hyphenated, width);
+
+    ParagraphStyle paragraph_style;
+    paragraph_style.turnHintingOff();
+    paragraph_style.setApplyRoundingHack(false);
+    paragraph_style.setRenderSoftHyphens(true);
+    ParagraphBuilderImpl builder(paragraph_style, fontCollection, get_unicode());
+    TextStyle text_style;
+    text_style.setFontFamilies({SkString("Roboto")});
+    text_style.setFontSize(20);
+    text_style.setColor(SK_ColorBLACK);
+    builder.pushStyle(text_style);
+    std::string utf8 = withSoftHyphens(text);
+    builder.addText(utf8.c_str(), utf8.size());
+    builder.addPlaceholder(PlaceholderStyle(
+            20, 20, PlaceholderAlignment::kBaseline, TextBaseline::kAlphabetic, 0));
+    builder.pop();
+    auto paragraph = builder.Build();
+    paragraph->layout(width);
+    // The second line holds only the placeholder.
+    checkLines(reporter, paragraph.get(), "xy abcdi|");
+}
+
+// With no earlier break opportunity on the line, the soft hyphen break is still used and the
+// hyphen overflows, rather than breaking inside the word (also like browsers).
+UNIX_ONLY_TEST(SkParagraph_SoftHyphenOnlyBreakMayOverflow, reporter) {
+    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>(true);
+    SKIP_IF_FONTS_NOT_FOUND(reporter, fontCollection)
+
+    SkScalar hyphen = singleLineWidth(fontCollection, "-");
+    SkScalar width = singleLineWidth(fontCollection, "abcd") + hyphen / 2;
+    auto paragraph = layoutWithSoftHyphens(fontCollection, "abcd~efgh", width);
+    checkLines(reporter, paragraph.get(), "abcd-|efgh");
+    REPORTER_ASSERT(reporter, paragraph->getLongestLine() > width);
+}
+
+// The hyphen only counts if the line ends at the soft hyphen. Here the line would overflow if it
+// ended there, but the text after the soft hyphen is narrower than the hyphen, so the line can
+// continue past it to the next space.
+UNIX_ONLY_TEST(SkParagraph_SoftHyphenBreakNotTakenNeedsNoRoom, reporter) {
+    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>(true);
+    SKIP_IF_FONTS_NOT_FOUND(reporter, fontCollection)
+
+    SkScalar width = singleLineWidth(fontCollection, "xy abcd~i") + 0.3f;
+    SkScalar hyphenated = singleLineWidth(fontCollection, "xy abcd-");
+    REPORTER_ASSERT(reporter, hyphenated > width + 0.3f, "%g vs %g", hyphenated, width);
+    auto paragraph = layoutWithSoftHyphens(fontCollection, "xy abcd~i jklm", width);
+    checkLines(reporter, paragraph.get(), "xy abcdi|jklm");
 }
 
 #if defined(SK_UNICODE_ICU_IMPLEMENTATION)

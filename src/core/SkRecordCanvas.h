@@ -15,10 +15,10 @@
 #include "include/core/SkSamplingOptions.h"
 #include "include/core/SkScalar.h"
 #include "include/core/SkTypes.h"
+#include "include/cpu/Recorder.h"
 #include "include/private/SkNoncopyable.h"
 #include "include/private/SkTDArray.h"
 #include "include/utils/SkNoDrawCanvas.h"
-#include "src/cpu/Recorder.h"
 
 #include <cstddef>
 #include <memory>
@@ -38,6 +38,7 @@ class SkRecord;
 class SkRecorder;
 class SkRegion;
 class SkShader;
+class SkSnapshotArray;
 class SkSurface;
 class SkSurfaceProps;
 class SkTextBlob;
