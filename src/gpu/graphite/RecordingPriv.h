@@ -12,6 +12,7 @@
 #include "include/core/SkPoint.h"
 #include "include/core/SkRefCnt.h"  // IWYU pragma: keep
 #include "include/gpu/graphite/Recording.h"
+#include "include/private/SkOnlyStackAllocatable.h"
 
 #include <cstdint>
 #include <memory>
@@ -33,6 +34,8 @@ class TextureProxy;
 
 class RecordingPriv {
 public:
+    SK_ONLY_STACK_ALLOCATABLE;
+
     TextureProxy* deferredTargetProxy();
     const Texture* setupDeferredTarget(ResourceProvider*,
                                        Surface* targetSurface,
@@ -47,6 +50,7 @@ public:
     bool instantiateNonVolatileLazyProxies(ResourceProvider*);
 
     void setFailureResultForFinishedProcs();
+    void moveFinishedProcsTo(skia_private::TArray<sk_sp<RefCntedCallback>>& dst);
 
     bool prepareResources(ResourceProvider*,
                           ScratchResourceManager*,

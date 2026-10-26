@@ -23,6 +23,7 @@
 #include "include/private/SkDebug.h"
 #include "include/private/SkEnumBitMask.h"
 #include "include/private/SkFloatingPoint.h"
+#include "include/private/SkOnlyStackAllocatable.h"
 #include "src/core/SkPathPriv.h"
 #include "src/core/SkRRectPriv.h"
 #include "src/core/SkRectPriv.h"
@@ -328,6 +329,7 @@ Rect snap_scissor(const Rect& a, const Rect& deviceBounds) {
 // interact with each other, without needing to share a base class, friend each other, or have a
 // template for each combination of two types.
 struct ClipStack::TransformedShape {
+    SK_ONLY_STACK_ALLOCATABLE;
     const Transform& fLocalToDevice;
     const Shape&     fShape;
     const Rect&      fOuterBounds;
@@ -1372,18 +1374,8 @@ bool ClipStack::DrawShape::applyStyle(const SkStrokeRec& style, const Rect& devi
         // SkStrokeRec::GetInflationRadius() returns a device-space inflation for hairlines.
         float localOutset = 0.f;
         if (!style.isFillStyle() && !style.isHairlineStyle()) {
-            // Rectangles, rounded rectangles, and lines do not produce miters so don't count the
-            // pessimistic limit against their draw bounds.
-            const float effectiveMiterLimit = fShape.isPath() ? style.getMiter() : 1.f;
-            // Rectangles and rounded rectangles don't have caps, so don't count that against their
-            // draw bounds (if we could efficiently know a path was a closed contour, it could
-            // be included here too).
-            const SkPaint::Cap effectiveCap = fShape.isRect() || fShape.isRRect()
-                    ? SkPaint::kButt_Cap : style.getCap();
-            localOutset = SkStrokeRec::GetInflationRadius(style.getJoin(),
-                                                          effectiveMiterLimit,
-                                                          effectiveCap,
-                                                          style.getWidth());
+            localOutset = fShape.getInflationRadius(
+                    style.getJoin(), style.getMiter(), style.getCap(), style.getWidth());
         }
 
         if (style.isHairlineStyle() ||

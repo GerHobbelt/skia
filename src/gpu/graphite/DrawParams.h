@@ -11,6 +11,7 @@
 #include "include/core/SkPaint.h"
 #include "include/core/SkRect.h"
 #include "include/private/SkAssert.h"
+#include "include/private/SkOnlyStackAllocatable.h"
 #include "include/private/SkTo.h"
 #include "src/gpu/graphite/DrawOrder.h"
 #include "src/gpu/graphite/DrawTypes.h"
@@ -70,6 +71,8 @@ private:
 
 class Clip {
 public:
+    SK_ONLY_STACK_ALLOCATABLE;
+
     Clip() = default;
     Clip(const Rect& drawBounds,
          const Rect& shapeBounds,
@@ -170,6 +173,18 @@ public:
     const StrokeStyle& strokeStyle() const {
         SkASSERT(this->isStroke());
         return *fStroke;
+    }
+
+    Rect styledBounds() const {
+        Rect localBounds = fGeometry.bounds();
+        if (this->isStroke() && fGeometry.isShape()) {
+            float localOutset = fGeometry.shape().getInflationRadius(fStroke->join(),
+                                                                     fStroke->miterLimit(),
+                                                                     fStroke->cap(),
+                                                                     fStroke->width());
+            localBounds.outset(localOutset);
+        }
+        return localBounds;
     }
 
 private:
