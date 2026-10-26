@@ -1105,6 +1105,7 @@ static bool is_globally_reachable_op(SpvOp_ op) {
         case SpvOpExecutionMode:
         case SpvOpMemoryModel:
         case SpvOpCapability:
+        case SpvOpExtension:
         case SpvOpExtInstImport:
         case SpvOpEntryPoint:
         case SpvOpSource:
@@ -3661,6 +3662,11 @@ std::unique_ptr<Expression> SPIRVCodeGenerator::identifier(std::string_view name
 
 SpvId SPIRVCodeGenerator::writeVariableReference(const VariableReference& ref, SPIRVBlob& out) {
     const Variable* variable = ref.variable();
+    if (IsSubgroupBuiltin(variable->layout().fBuiltin) && !fCaps.fSubgroupSupport) {
+        fContext.fErrors->error(ref.position(),
+                                "'" + std::string(variable->name()) + "' not supported");
+        return NA;
+    }
     switch (variable->layout().fBuiltin) {
         case DEVICE_FRAGCOORDS_BUILTIN: {
             // Down below, we rewrite raw references to sk_FragCoord with expressions that reference
@@ -4791,6 +4797,10 @@ void SPIRVCodeGenerator::writeLayout(const Layout& layout, SpvId target, Positio
                                  layout.fBuiltin != SK_SECONDARYFRAGCOLOR_BUILTIN)) {
             this->writeInstruction(SpvOpDecorate, target, SpvDecorationBuiltIn, layout.fBuiltin,
                                    fDecorationBuffer);
+            if (IsSubgroupBuiltin(layout.fBuiltin)) {
+                // The subgroup builtins require GroupNonUniform (SPIR-V 1.3).
+                this->addCapability(SpvCapabilityGroupNonUniform);
+            }
     }
 }
 
@@ -5753,6 +5763,13 @@ void SPIRVCodeGenerator::writeInstructions(const Program& program, SPIRVBlob& ou
         }
     }
     this->writeCapabilities(out);
+    // On Vulkan, maximal reconvergence only applies to entry points that opt in, so this is what
+    // makes ShaderCaps::fSubgroupMaximalReconvergence hold. Subgroups are only exposed in compute.
+    const bool maximallyReconverges = ProgramConfig::IsCompute(program.fConfig->fKind) &&
+                                      fCaps.fSubgroupMaximalReconvergence;
+    if (maximallyReconverges) {
+        this->writeInstruction(SpvOpExtension, "SPV_KHR_maximal_reconvergence", out);
+    }
     this->writeInstruction(SpvOpExtInstImport, fGLSLExtendedInstructions, "GLSL.std.450", out);
     this->writeInstruction(SpvOpMemoryModel, SpvAddressingModelLogical, SpvMemoryModelGLSL450, out);
     this->writeOpCode(SpvOpEntryPoint,
@@ -5785,6 +5802,12 @@ void SPIRVCodeGenerator::writeInstructions(const Program& program, SPIRVBlob& ou
                                SpvExecutionModeLocalSize,
                                localSizeX, localSizeY, localSizeZ,
                                out);
+        if (maximallyReconverges) {
+            this->writeInstruction(SpvOpExecutionMode,
+                                   fFunctionMap[mainKey],
+                                   SpvExecutionModeMaximallyReconvergesKHR,
+                                   out);
+        }
     }
     for (const ProgramElement* e : program.elements()) {
         if (e->is<Extension>()) {

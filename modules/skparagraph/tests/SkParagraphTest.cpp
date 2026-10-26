@@ -10,6 +10,7 @@
 #include "include/core/SkFontMgr.h"
 #include "include/core/SkFontStyle.h"
 #include "include/core/SkPaint.h"
+#include "include/core/SkPath.h"
 #include "include/core/SkPoint.h"
 #include "include/core/SkRect.h"
 #include "include/core/SkRefCnt.h"
@@ -24,6 +25,7 @@
 #include "modules/skparagraph/include/FontCollection.h"
 #include "modules/skparagraph/include/Paragraph.h"
 #include "modules/skparagraph/include/ParagraphCache.h"
+#include "modules/skparagraph/include/ParagraphPainter.h"
 #include "modules/skparagraph/include/ParagraphStyle.h"
 #include "modules/skparagraph/include/TextShadow.h"
 #include "modules/skparagraph/include/TextStyle.h"
@@ -38,6 +40,7 @@
 #include "modules/skshaper/utils/FactoryHelpers.h"
 #include "src/core/SkOSFile.h"
 #include "src/core/SkTSort.h"
+#include "src/core/SkTaskGroup.h"
 #include "src/utils/SkOSPath.h"
 #include "tests/Test.h"
 #include "tools/Resources.h"
@@ -2869,6 +2872,200 @@ UNIX_ONLY_TEST(SkParagraph_DecorationsParagraph, reporter) {
                     ++index;
                     return true;
                 });
+    }
+}
+
+namespace {
+// Records glyphs and decoration paths in absolute coordinates so the test can check where
+// the drawn underline is interrupted against where the drawn glyphs actually are
+class GapsRecordingPainter final : public ParagraphPainter {
+public:
+    struct Blob {
+        sk_sp<SkTextBlob> fBlob;
+        SkPoint fOrigin;
+    };
+    struct Path {
+        SkPath fPath;
+        SkPoint fOrigin;
+        SkPaint fPaint;
+    };
+    std::vector<Blob> fBlobs;
+    std::vector<Path> fPaths;
+    std::vector<SkRect> fFilledRects;
+
+    void drawTextBlob(const sk_sp<SkTextBlob>& blob, SkScalar x, SkScalar y,
+                      const SkPaintOrID&) override {
+        fBlobs.push_back({blob, fOrigin + SkPoint::Make(x, y)});
+    }
+    void drawTextShadow(const sk_sp<SkTextBlob>&, SkScalar, SkScalar, SkColor, SkScalar) override {}
+    void drawRect(const SkRect&, const SkPaintOrID&) override {}
+    void drawFilledRect(const SkRect& rect, const DecorationStyle&) override {
+        fFilledRects.push_back(rect.makeOffset(fOrigin));
+    }
+    void drawPath(const SkPath& path, const DecorationStyle& decorStyle) override {
+        fPaths.push_back({path, fOrigin, decorStyle.skPaint()});
+    }
+    void drawLine(SkScalar, SkScalar, SkScalar, SkScalar, const DecorationStyle&) override {}
+    void clipRect(const SkRect&) override {}
+    void translate(SkScalar dx, SkScalar dy) override { fOrigin += SkPoint::Make(dx, dy); }
+    void save() override { fStack.push_back(fOrigin); }
+    void restore() override {
+        fOrigin = fStack.back();
+        fStack.pop_back();
+    }
+
+    std::unique_ptr<Paragraph> paintUnderlineGaps(const char* text,
+                                                  SkScalar baselineShift = 0.0f,
+                                                  SkScalar height = 0.0f,
+                                                  bool halfLeading = false) {
+        auto fontCollection = sk_make_sp<FontCollection>();
+        fontCollection->setDefaultFontManager(ToolUtils::TestFontMgr());
+        ParagraphStyle paragraphStyle;
+        TextStyle textStyle;
+        textStyle.setFontSize(50.0f);
+        textStyle.setColor(SK_ColorBLACK);
+        textStyle.setDecoration(TextDecoration::kUnderline);
+        textStyle.setDecorationMode(TextDecorationMode::kGaps);
+        textStyle.setDecorationStyle(TextDecorationStyle::kSolid);
+        textStyle.setBaselineShift(baselineShift);
+        textStyle.setHeightOverride(height != 0);
+        textStyle.setHeight(height);
+        textStyle.setHalfLeading(halfLeading);
+
+        ParagraphBuilderImpl builder(paragraphStyle, fontCollection, get_unicode());
+        builder.pushStyle(textStyle);
+        builder.addText(text);
+        builder.pop();
+        auto paragraph = builder.Build();
+        paragraph->layout(1000.0f);
+        paragraph->paint(this, 0, 0);
+        return paragraph;
+    }
+
+private:
+    SkPoint fOrigin = {0, 0};
+    std::vector<SkPoint> fStack;
+};
+}  // namespace
+
+// Underline gaps must hug the drawn glyphs regardless of baselineShift or height
+DEF_TEST(SkParagraph_UnderlineGapsFollowDrawnGlyphs, reporter) {
+    auto check = [&](SkScalar baselineShift, SkScalar height, bool halfLeading) {
+        GapsRecordingPainter painter;
+        painter.paintUnderlineGaps("gjpqy", baselineShift, height, halfLeading);
+        REPORTER_ASSERT(reporter, painter.fBlobs.size() == 1);
+        REPORTER_ASSERT(reporter, painter.fPaths.size() == 1);
+        if (painter.fBlobs.size() != 1 || painter.fPaths.size() != 1) {
+            return;
+        }
+        const auto& blob = painter.fBlobs[0];
+        const auto& path = painter.fPaths[0];
+        SkSpan<const SkPoint> points = path.fPath.points();
+        // Without any gap the path holds only its two end points
+        REPORTER_ASSERT(reporter, points.size() > 2);
+        if (points.size() <= 2) {
+            return;
+        }
+
+        // Decorations::calculateGaps() intersects glyphs with [top, top + thickness]
+        // and keeps the underline one thickness (halo) away from every intersection
+        const SkScalar thickness = path.fPaint.getStrokeWidth();
+        const SkScalar top = path.fOrigin.fY + points[0].fY - blob.fOrigin.fY;
+        const SkScalar bounds[2] = {top, top + thickness};
+        int count = blob.fBlob->getIntercepts(bounds, nullptr, &path.fPaint);
+        std::vector<SkScalar> intercepts(count);
+        blob.fBlob->getIntercepts(bounds, intercepts.data(), &path.fPaint);
+        REPORTER_ASSERT(reporter, count > 0);
+
+        for (size_t i = 1; i + 1 < points.size(); ++i) {
+            const SkScalar x = path.fOrigin.fX + points[i].fX - blob.fOrigin.fX;
+            bool hugsGlyph = false;
+            for (int j = 0; j < count; ++j) {
+                const SkScalar edge = intercepts[j] + (j % 2 == 0 ? -thickness : thickness);
+                hugsGlyph |= SkScalarNearlyEqual(x, edge, EPSILON100);
+            }
+            REPORTER_ASSERT(reporter, hugsGlyph,
+                            "shift=%g height=%g halfLeading=%d gap edge %g",
+                            baselineShift, height, halfLeading, x);
+        }
+    };
+    check(0.0f, 0.0f, false);
+    check(-12.0f, 0.0f, false);
+    check(12.0f, 0.0f, false);
+    check(0.0f, 2.0f, false);
+    check(0.0f, 2.0f, true);
+}
+
+// An underline in gaps mode that no glyph crosses must still be drawn in full
+DEF_TEST(SkParagraph_UnderlineGapsWithoutIntersections, reporter) {
+    GapsRecordingPainter painter;
+    auto paragraph = painter.paintUnderlineGaps("aaa");
+    REPORTER_ASSERT(reporter, painter.fPaths.size() == 1);
+    if (painter.fPaths.size() != 1) {
+        return;
+    }
+    SkSpan<const SkPoint> points = painter.fPaths[0].fPath.points();
+    REPORTER_ASSERT(reporter, points.size() == 2);
+    if (points.size() != 2) {
+        return;
+    }
+    REPORTER_ASSERT(reporter, SkScalarNearlyEqual(points[1].fX - points[0].fX,
+                                                  paragraph->getLongestLine(), EPSILON100));
+}
+
+// Overline, underline, and line-through must shift vertically by exactly baselineShift,
+// maintaining a constant offset from the drawn glyphs
+DEF_TEST(SkParagraph_DecorationsFollowBaselineShift, reporter) {
+    auto fontCollection = sk_make_sp<FontCollection>();
+    fontCollection->setDefaultFontManager(ToolUtils::TestFontMgr());
+
+    auto measure = [&](TextDecoration decoration, SkScalar baselineShift, SkScalar height) {
+        ParagraphStyle paragraphStyle;
+        TextStyle unshiftedStyle;
+        unshiftedStyle.setFontSize(50.0f);
+        unshiftedStyle.setHeightOverride(height != 0);
+        unshiftedStyle.setHeight(height);
+
+        TextStyle shiftedStyle = unshiftedStyle;
+        shiftedStyle.setColor(SK_ColorBLACK);
+        shiftedStyle.setDecoration(decoration);
+        shiftedStyle.setDecorationStyle(TextDecorationStyle::kSolid);
+        shiftedStyle.setBaselineShift(baselineShift);
+
+        ParagraphBuilderImpl builder(paragraphStyle, fontCollection, get_unicode());
+        builder.pushStyle(unshiftedStyle);
+        builder.addText("Anchor ");
+        builder.pushStyle(shiftedStyle);
+        builder.addText("Shifted");
+        builder.pop();
+        builder.pop();
+        auto paragraph = builder.Build();
+        paragraph->layout(1000.0f);
+
+        GapsRecordingPainter painter;
+        paragraph->paint(&painter, 0, 0);
+        REPORTER_ASSERT(reporter, painter.fBlobs.size() == 2);
+        REPORTER_ASSERT(reporter, painter.fFilledRects.size() == 1);
+        if (painter.fBlobs.size() != 2 || painter.fFilledRects.size() != 1) {
+            return 0.0f;
+        }
+        return painter.fFilledRects[0].centerY() - painter.fBlobs[1].fOrigin.fY;
+    };
+
+    for (auto decoration : {TextDecoration::kUnderline,
+                            TextDecoration::kOverline,
+                            TextDecoration::kLineThrough}) {
+        for (SkScalar height : {0.0f, 2.0f}) {
+            const SkScalar baseOffset = measure(decoration, 0.0f, height);
+            for (SkScalar shift : {-15.0f, 15.0f}) {
+                const SkScalar shiftedOffset = measure(decoration, shift, height);
+                REPORTER_ASSERT(reporter,
+                                SkScalarNearlyEqual(shiftedOffset, baseOffset, 1.0f),
+                                "decoration=%d height=%g shift=%g expected=%g got=%g",
+                                static_cast<int>(decoration), height, shift,
+                                baseOffset, shiftedOffset);
+            }
+        }
     }
 }
 
@@ -8188,6 +8385,58 @@ UNIX_ONLY_TEST(SkParagraph_GetRectsForRangeConcurrently, reporter) {
     }
 }
 
+// Concurrent layout, findTypefaces, and defaultFallback on a shared FontCollection must not race
+// when FaceCache and VariationCache grow and rehash across threads
+UNIX_ONLY_TEST(SkParagraph_FontCollectionConcurrently, reporter) {
+    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>();
+    SKIP_IF_FONTS_NOT_FOUND(reporter, fontCollection)
+
+    constexpr int kThreadCount = 100;
+    SkTypefaceID sharedTypefaceIDs[kThreadCount] = {};
+    FontArguments sharedArgs(SkFontArguments().setCollectionIndex(0));
+    std::unique_ptr<SkFunctionalExecutor> executor =
+            SkFunctionalExecutors::MakeFIFOThreadPool(kThreadCount, false);
+    SkTaskGroup tasks(*executor);
+
+    for (int i = 0; i < kThreadCount; ++i) {
+        tasks.add([&, i] {
+            auto sharedFaces =
+                    fontCollection->findTypefaces({SkString("Roboto")}, SkFontStyle(), sharedArgs);
+            if (!sharedFaces.empty() && sharedFaces[0]) {
+                sharedTypefaceIDs[i] = sharedFaces[0]->uniqueID();
+            }
+
+            SkFontArguments skFontArgs = SkFontArguments().setCollectionIndex(i + 1);
+            FontArguments fontArgs(skFontArgs);
+
+            ParagraphStyle paragraphStyle;
+            TextStyle textStyle;
+            textStyle.setFontFamilies({SkString("Roboto")});
+            textStyle.setFontSize(14);
+            textStyle.setColor(SK_ColorBLACK);
+            textStyle.setFontArguments(skFontArgs);
+
+            ParagraphBuilderImpl builder(paragraphStyle, fontCollection, get_unicode());
+            builder.pushStyle(textStyle);
+            builder.addText(u"Concurrent layout text");
+            builder.pop();
+
+            auto paragraph = builder.Build();
+            paragraph->layout(300);
+            REPORTER_ASSERT(reporter, paragraph->getHeight() > 0);
+
+            fontCollection->findTypefaces({SkString("Roboto")}, SkFontStyle::Bold(), fontArgs);
+            fontCollection->defaultFallback(
+                    0x276F, {SkString("Roboto")}, SkFontStyle(), SkString("en"), fontArgs);
+        });
+    }
+    tasks.wait();
+    REPORTER_ASSERT(reporter, sharedTypefaceIDs[0] != 0);
+    for (SkTypefaceID id : sharedTypefaceIDs) {
+        REPORTER_ASSERT(reporter, id == sharedTypefaceIDs[0]);
+    }
+}
+
 UNIX_ONLY_TEST(SkParagraph_TabSubstitution, reporter) {
     sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>(true);
     SKIP_IF_FONTS_NOT_FOUND(reporter, fontCollection)
@@ -10670,6 +10919,239 @@ UNIX_ONLY_TEST(SkParagraph_SoftHyphenBreakNotTakenNeedsNoRoom, reporter) {
     REPORTER_ASSERT(reporter, hyphenated > width + 0.3f, "%g vs %g", hyphenated, width);
     auto paragraph = layoutWithSoftHyphens(fontCollection, "xy abcd~i jklm", width);
     checkLines(reporter, paragraph.get(), "xy abcdi|jklm");
+}
+
+// Laid out at its min intrinsic width, text with soft hyphens doesn't overflow: as in CSS
+// min-content, the min intrinsic width includes the hyphen drawn at a soft hyphen break.
+UNIX_ONLY_TEST(SkParagraph_SoftHyphenMinIntrinsicWidthIncludesHyphen, reporter) {
+    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>(true);
+    SKIP_IF_FONTS_NOT_FOUND(reporter, fontCollection)
+
+    const char* text = "xy abcd~ef";
+    SkScalar minWidth = layoutWithSoftHyphens(fontCollection, text, 1000)->getMinIntrinsicWidth();
+    auto paragraph = layoutWithSoftHyphens(fontCollection, text, minWidth);
+    checkLines(reporter, paragraph.get(), "xy|abcd-|ef");
+    REPORTER_ASSERT(reporter,
+                    paragraph->getLongestLine() <= minWidth + EPSILON100,
+                    "%g > %g",
+                    paragraph->getLongestLine(),
+                    minWidth);
+}
+
+// The hyphen counts with the width of the string that's drawn, and only where one is drawn.
+UNIX_ONLY_TEST(SkParagraph_SoftHyphenMinIntrinsicWidthCountsDrawnHyphen, reporter) {
+    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>(true);
+    SKIP_IF_FONTS_NOT_FOUND(reporter, fontCollection)
+
+    auto minWidth = [&](const char* text, bool render, const char* hyphen) {
+        auto configure = [&](ParagraphStyle& style) {
+            style.setRenderSoftHyphens(render);
+            style.setSoftHyphenString(SkString(hyphen));
+        };
+        return layoutWithSoftHyphens(fontCollection, text, 1000, configure)->getMinIntrinsicWidth();
+    };
+    // "abcd" is the widest word, so the hidden case is its width.
+    SkScalar hidden = minWidth("xy abcd~ef", false, "-");
+    for (const char* hyphen : {"-", "--"}) {
+        SkScalar extra = minWidth("xy abcd~ef", true, hyphen) - hidden;
+        SkScalar hyphenWidth = singleLineWidth(fontCollection, hyphen);
+        REPORTER_ASSERT(reporter,
+                        SkScalarNearlyEqual(extra, hyphenWidth, EPSILON100),
+                        "%s: %g vs %g",
+                        hyphen,
+                        extra,
+                        hyphenWidth);
+    }
+    // A soft hyphen at the end of the text never breaks a line, so no hyphen is drawn for it.
+    SkScalar atEnd = minWidth("xy abcd~", true, "-");
+    REPORTER_ASSERT(reporter, SkScalarNearlyEqual(atEnd, minWidth("xy abcd~", false, "-")));
+}
+
+// The min intrinsic width doesn't depend on the layout width: a word too long for the line still
+// counts with its hyphen.
+UNIX_ONLY_TEST(SkParagraph_SoftHyphenMinIntrinsicWidthOfTooLongWord, reporter) {
+    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>(true);
+    SKIP_IF_FONTS_NOT_FOUND(reporter, fontCollection)
+
+    const char* text = "xy abcdefghij~k";
+    SkScalar wide = layoutWithSoftHyphens(fontCollection, text, 1000)->getMinIntrinsicWidth();
+    SkScalar narrow = layoutWithSoftHyphens(fontCollection, text, 30)->getMinIntrinsicWidth();
+    auto hide = [](ParagraphStyle& style) { style.setRenderSoftHyphens(false); };
+    SkScalar hidden = layoutWithSoftHyphens(fontCollection, text, 30, hide)->getMinIntrinsicWidth();
+    REPORTER_ASSERT(
+            reporter, SkScalarNearlyEqual(narrow, wide, EPSILON100), "%g vs %g", narrow, wide);
+    REPORTER_ASSERT(reporter, narrow > hidden + 1, "%g vs %g", narrow, hidden);
+}
+
+// Verifies that letter-spaced words ending at a soft hyphen include U+00AD's letterSpacing in
+// nextWordLength when the word is too long or breaks directly on the U+00AD cluster
+UNIX_ONLY_TEST(SkParagraph_SoftHyphenMinIntrinsicWidthLetterSpacing, reporter) {
+    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>(true);
+    SKIP_IF_FONTS_NOT_FOUND(reporter, fontCollection)
+
+    auto buildAndLayout = [&](SkScalar width) {
+        ParagraphStyle paragraphStyle;
+        paragraphStyle.turnHintingOff();
+        paragraphStyle.setApplyRoundingHack(false);
+        paragraphStyle.setRenderSoftHyphens(true);
+        ParagraphBuilderImpl builder(paragraphStyle, fontCollection, get_unicode());
+
+        TextStyle textStyle;
+        textStyle.setFontFamilies({SkString("Roboto")});
+        textStyle.setFontSize(20);
+        textStyle.setLetterSpacing(10);
+        builder.pushStyle(textStyle);
+        std::string utf8 = withSoftHyphens("xy abcdefghij~k");
+        builder.addText(utf8.c_str(), utf8.size());
+        builder.pop();
+
+        auto paragraph = builder.Build();
+        paragraph->layout(width);
+        return paragraph;
+    };
+
+    SkScalar wide = buildAndLayout(1000)->getMinIntrinsicWidth();
+    SkScalar narrow = buildAndLayout(30)->getMinIntrinsicWidth();
+    REPORTER_ASSERT(
+            reporter, SkScalarNearlyEqual(narrow, wide, EPSILON100), "%g vs %g", narrow, wide);
+
+    // Also test breaking right on the U+00AD cluster itself when letterSpacing > 0 gives it width:
+    // "xy abcd" fits, "xy abcd~" exceeds maxWidth by U+00AD's letterSpacing
+    ParagraphStyle ps;
+    ps.turnHintingOff();
+    ps.setApplyRoundingHack(false);
+    TextStyle ts;
+    ts.setFontFamilies({SkString("Roboto")});
+    ts.setFontSize(20);
+    ts.setLetterSpacing(10);
+
+    ParagraphBuilderImpl b2(ps, fontCollection, get_unicode());
+    b2.pushStyle(ts);
+    b2.addText("xy abcd", 7);
+    b2.pop();
+    auto p2 = b2.Build();
+    p2->layout(1000);
+    SkScalar xyAbcdWidth = p2->getMaxIntrinsicWidth();
+
+    ps.setRenderSoftHyphens(true);
+    auto buildShort = [&]() {
+        ParagraphBuilderImpl b(ps, fontCollection, get_unicode());
+        b.pushStyle(ts);
+        std::string shortUtf8 = withSoftHyphens("xy abcd~ef");
+        b.addText(shortUtf8.c_str(), shortUtf8.size());
+        b.pop();
+        return b.Build();
+    };
+    auto pWide = buildShort();
+    pWide->layout(1000);
+    SkScalar expectedMin = pWide->getMinIntrinsicWidth();
+
+    auto pOnShy = buildShort();
+    pOnShy->layout(xyAbcdWidth + 5);
+    REPORTER_ASSERT(reporter,
+                    SkScalarNearlyEqual(pOnShy->getMinIntrinsicWidth(), expectedMin, EPSILON100),
+                    "%g vs %g",
+                    pOnShy->getMinIntrinsicWidth(),
+                    expectedMin);
+}
+
+// Verifies that fMinIntrinsicWidth counts the hyphenated word width when nextWordLength <= maxWidth
+// in lookAhead and in the post-maxLines remainder loop
+UNIX_ONLY_TEST(SkParagraph_SoftHyphenMinIntrinsicWidthMaxLines, reporter) {
+    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>(true);
+    SKIP_IF_FONTS_NOT_FOUND(reporter, fontCollection)
+
+    const char* text = "xy za abcd~i";
+    SkScalar expectedMin =
+            layoutWithSoftHyphens(fontCollection, text, 1000)->getMinIntrinsicWidth();
+    SkScalar abcdWidth = singleLineWidth(fontCollection, "abcd");
+
+    // Layout at width between width("abcd") and width("abcd-") with maxLines=2:
+    // Line 1 breaks after "xy" and Line 2 breaks after "za" because "za abcd" exceeds maxWidth,
+    // while in lookAhead's further loop nextWordLength ("abcd") <= maxWidth, and the post-maxLines
+    // remainder loop scans "abcd~i" without splitting at the soft hyphen or adding hyphenWidth
+    SkScalar actualMin =
+            layoutWithSoftHyphens(fontCollection, text, abcdWidth + 1, [](ParagraphStyle& style) {
+                style.setMaxLines(2);
+            })->getMinIntrinsicWidth();
+    REPORTER_ASSERT(reporter,
+                    SkScalarNearlyEqual(actualMin, expectedMin, EPSILON100),
+                    "%g vs %g",
+                    actualMin,
+                    expectedMin);
+
+    // Also verify that a word split at a non-breaking space (U+00A0) in lookAhead is not
+    // inflated to the unsplit "aa\u00A0bbbb" width in fMinIntrinsicWidth
+    SkScalar xxxxAaWidth = singleLineWidth(fontCollection, "xxxx aa");
+    SkScalar unsplitNbspWidth = singleLineWidth(fontCollection,
+                                                "aa\xC2\xA0"
+                                                "bbbb");
+    auto nbspParagraph = layoutWithSoftHyphens(fontCollection,
+                                               "xxxx aa\xC2\xA0"
+                                               "bbbb",
+                                               xxxxAaWidth + 2);
+    REPORTER_ASSERT(reporter,
+                    nbspParagraph->getMinIntrinsicWidth() < unsplitNbspWidth - 1,
+                    "%g vs %g",
+                    nbspParagraph->getMinIntrinsicWidth(),
+                    unsplitNbspWidth);
+}
+
+// Verifies that layout(0), which places 1 cluster per line and tracks the max single-cluster
+// width in nextWordLength, does not inflate fMinIntrinsicWidth by nextWordHyphenWidth
+UNIX_ONLY_TEST(SkParagraph_SoftHyphenMinIntrinsicWidthZeroLayoutWidth, reporter) {
+    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>(true);
+    SKIP_IF_FONTS_NOT_FOUND(reporter, fontCollection)
+
+    const char* text = "xy abcd~ef";
+    SkScalar zero = layoutWithSoftHyphens(fontCollection, text, 0)->getMinIntrinsicWidth();
+    auto hide = [](ParagraphStyle& style) { style.setRenderSoftHyphens(false); };
+    SkScalar hiddenZero =
+            layoutWithSoftHyphens(fontCollection, text, 0, hide)->getMinIntrinsicWidth();
+    REPORTER_ASSERT(reporter,
+                    SkScalarNearlyEqual(zero, hiddenZero, EPSILON100),
+                    "%g vs %g",
+                    zero,
+                    hiddenZero);
+}
+
+// Verifies that softHyphenWidth shapes with font fallback when the word's font lacks the hyphen
+// glyph, matching the hyphen run shaped by TextLine::createSoftHyphen
+UNIX_ONLY_TEST(SkParagraph_SoftHyphenFallbackFontWidth, reporter) {
+    sk_sp<ResourceFontCollection> fontCollection = sk_make_sp<ResourceFontCollection>(true);
+    SKIP_IF_FONTS_NOT_FOUND(reporter, fontCollection)
+
+    auto buildWithFallbackHyphen = [&](SkScalar width) {
+        ParagraphStyle paragraphStyle;
+        paragraphStyle.turnHintingOff();
+        paragraphStyle.setApplyRoundingHack(false);
+        paragraphStyle.setRenderSoftHyphens(true);
+        // U+4E00 is absent from Roboto and falls back to Source Han Serif CN in shapeEllipsis,
+        // whose fullwidth glyph (20px) is wider than Roboto's .notdef glyph
+        paragraphStyle.setSoftHyphenString(SkString("\xE4\xB8\x80"));
+        ParagraphBuilderImpl builder(paragraphStyle, fontCollection, get_unicode());
+
+        TextStyle textStyle;
+        textStyle.setFontFamilies({SkString("Roboto"), SkString("Source Han Serif CN")});
+        textStyle.setFontSize(20);
+        builder.pushStyle(textStyle);
+        std::string utf8 = withSoftHyphens("xy abcd~efgh");
+        builder.addText(utf8.c_str(), utf8.size());
+        builder.pop();
+
+        auto paragraph = builder.Build();
+        paragraph->layout(width);
+        return paragraph;
+    };
+
+    SkScalar minWidth = buildWithFallbackHyphen(1000)->getMinIntrinsicWidth();
+    auto atMin = buildWithFallbackHyphen(minWidth);
+    checkLines(reporter, atMin.get(), "xy|abcd-|efgh");
+    REPORTER_ASSERT(reporter,
+                    atMin->getLongestLine() <= minWidth + EPSILON100,
+                    "%g > %g",
+                    atMin->getLongestLine(),
+                    minWidth);
 }
 
 #if defined(SK_UNICODE_ICU_IMPLEMENTATION)

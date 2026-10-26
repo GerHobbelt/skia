@@ -9,6 +9,7 @@
 
 #include "include/core/SkSpan.h"
 #include "include/private/SkEnumBitMask.h"
+#include "include/private/SkOnlyStackAllocatable.h"
 #include "include/private/SkTArray.h"
 #include "include/sksl/SkSLVersion.h"
 #include "src/core/SkNoDestructor.h"
@@ -128,6 +129,8 @@ private:
 
 class Parser::AutoSymbolTable {
 public:
+    SK_ONLY_STACK_ALLOCATABLE;
+
     AutoSymbolTable(Parser* p, std::unique_ptr<SymbolTable>* newSymbolTable, bool enable = true) {
         if (enable) {
             fParser = p;
@@ -152,6 +155,8 @@ private:
 
 class Parser::Checkpoint {
 public:
+    SK_ONLY_STACK_ALLOCATABLE;
+
     Checkpoint(Parser* p) : fParser(p) {
         Context& context = fParser->fCompiler.context();
         fPushbackCheckpoint = fParser->fPushback;
@@ -1291,6 +1296,12 @@ const Type* Parser::type(Modifiers* modifiers) {
         // you can't use them to declare a variable type or a function return type.
         this->error(type, "expected a type, found '" + std::string(this->text(type)) + "'");
         return fCompiler.context().fTypes.fInvalid.get();
+    }
+    if (result->matches(*fCompiler.context().fTypes.fInvalid)) {
+        // In runtime effects, reserved type names (e.g. sampler2D and texture2D) are aliases of the
+        // invalid type. Reject the type whenever it is used.
+        this->error(type, "invalid type");
+        return result;
     }
     Token bracket;
     while (this->checkNext(Token::Kind::TK_LBRACKET, &bracket)) {
